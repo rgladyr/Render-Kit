@@ -1,0 +1,7 @@
+{
+  "name": "com.paperfly.renderkit",
+  "version": "0.1.0",
+  "displayName": "PaperFly Render Kit",
+  "description": "Общие настройки проекта и валидаторы локаций для художников и разработчиков PaperFly.",
+  "unity": "6000.0"
+}
