@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 
 using UnityEditor;
@@ -19,6 +20,17 @@ namespace PaperFly.RenderKit.Validation
         [MenuItem(Constants.Menu.ValidateLocations)]
         public static void ValidateAll()
         {
+            Rescan();
+
+            ValidationWindow.Open();
+        }
+
+        /// <summary>
+        /// Заново проверяет все файлы локаций и обновляет отчёт, не открывая окно.
+        /// </summary>
+        /// <returns>Все найденные проблемы.</returns>
+        public static List<ValidationIssue> Rescan()
+        {
             ValidationReport.Clear();
 
             foreach (var path in FindLocationAssets("t:Model"))
@@ -33,7 +45,7 @@ namespace PaperFly.RenderKit.Validation
                     ModelValidator.ValidateTexture(path));
             }
 
-            ValidationWindow.Open();
+            return ValidationReport.GetAll();
         }
 
         private static string[] FindLocationAssets(string filter)
