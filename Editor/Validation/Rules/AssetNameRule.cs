@@ -61,7 +61,7 @@ namespace PaperFly.RenderKit.Validation
             string assetPath,
             string message)
             => new ValidationIssue(
-                ValidationSeverity.Warning,
+                ValidationSeverity.Error,
                 assetPath,
                 string.Empty,
                 message);

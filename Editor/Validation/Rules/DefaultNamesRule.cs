@@ -59,7 +59,7 @@ namespace PaperFly.RenderKit.Validation
             {
                 issues.Add(
                     context.CreateIssue(
-                        ValidationSeverity.Warning,
+                        ValidationSeverity.Error,
                         target,
                         $"Имя Blender по умолчанию «{target.name}». Дайте объекту осмысленное имя."));
 
@@ -70,7 +70,7 @@ namespace PaperFly.RenderKit.Validation
             {
                 issues.Add(
                     context.CreateIssue(
-                        ValidationSeverity.Warning,
+                        ValidationSeverity.Error,
                         target,
                         $"Суффикс копии в имени «{target.name}». Похоже на случайный дубль."));
             }
@@ -97,7 +97,7 @@ namespace PaperFly.RenderKit.Validation
             {
                 issues.Add(
                     context.CreateIssue(
-                        ValidationSeverity.Warning,
+                        ValidationSeverity.Error,
                         target,
                         $"Материал с именем Blender по умолчанию «{name}». Дайте материалу осмысленное имя."));
             }
