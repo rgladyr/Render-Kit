@@ -84,6 +84,7 @@ out/
 # Build results
 [Dd]ebug/
 [Rr]elease/
+!Editor/Release/
 x64/
 x86/
 [Ww][Ii][Nn]32/
