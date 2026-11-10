@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 
+using PaperFly.RenderKit.Release;
 using PaperFly.RenderKit.Validation;
 
 using UnityEditor;
@@ -70,6 +71,11 @@ namespace PaperFly.RenderKit.Acceptance
             if (result.IsAccepted)
             {
                 return "принята";
+            }
+
+            if (result.IsTrial)
+            {
+                return "проверочная: коммит локации, а не выпуск";
             }
 
             return result.Accepted == null
@@ -187,7 +193,13 @@ namespace PaperFly.RenderKit.Acceptance
                 this.expanded.Remove(location.Name);
             }
 
-            if (!result.CanAccept)
+            if (result.IsTrial)
+            {
+                EditorGUILayout.HelpBox(
+                    "Подключён коммит локации без выпуска: смотреть и проверять можно, принять и закоммитить эту версию пакета нельзя. Для приёма художник выпускает версию через «" + ReleasePreparation.MenuPath + "».",
+                    MessageType.Info);
+            }
+            else if (!result.CanAccept)
             {
                 EditorGUILayout.HelpBox(
                     "Есть ошибки: версию нельзя принять. Список — в окне отчёта.",

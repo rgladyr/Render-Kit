@@ -29,6 +29,10 @@ namespace PaperFly.RenderKit.Acceptance
         // Ссылка на префаб или модель целиком (m_SourcePrefab). Такого объекта нет среди содержимого файла, но он есть всегда.
         private const long PrefabAssetFileId = 100100000;
 
+        // Unity при подключении дописывает в package.json служебные поля (_fingerprint), поэтому его хеш всегда другой.
+        // Имя и версия из него сверяются отдельно.
+        private const string PackageFileName = "package.json";
+
         private static readonly string[] Rules = { DeliveryRule, RenderKitRule, LostLinkRule };
 
         private static void AddIssue(
@@ -59,10 +63,10 @@ namespace PaperFly.RenderKit.Acceptance
             {
                 AddIssue(
                     result,
-                    ValidationSeverity.Error,
+                    ValidationSeverity.Warning,
                     location.AssetFolder,
                     DeliveryRule,
-                    $"Манифест выпуска старого формата ({manifest.format}, нужен {ReleaseManifest.CurrentFormat}): по нему нельзя найти потерянные правки. Художнику нужно заново подготовить и выпустить версию.");
+                    $"Проверочная версия: манифест выпуска старого формата ({manifest.format}, нужен {ReleaseManifest.CurrentFormat}), по нему нельзя найти потерянные правки. Смотреть можно, принять нельзя: художнику нужно заново подготовить и выпустить версию.");
             }
 
             if (!string.Equals(
@@ -130,6 +134,10 @@ namespace PaperFly.RenderKit.Acceptance
                         $"Вместо файла {entry.path} пришёл указатель LFS: проверьте .gitattributes в папке пакета и что файл отправлен в LFS.");
                 }
                 else if (!string.Equals(
+                             entry.path,
+                             PackageFileName,
+                             StringComparison.OrdinalIgnoreCase)
+                      && !string.Equals(
                              ManifestBuilder.Hash(diskPath),
                              entry.hash,
                              StringComparison.Ordinal))
@@ -335,12 +343,14 @@ namespace PaperFly.RenderKit.Acceptance
             {
                 if (result.Location.Manifest == null)
                 {
+                    // Разработчик может подключить любой коммит локации, чтобы разобраться в проблеме вместе с художником.
+                    // Такая версия не ошибка, но принять и закоммитить её нельзя.
                     AddIssue(
                         result,
-                        ValidationSeverity.Error,
+                        ValidationSeverity.Warning,
                         result.Location.AssetFolder,
                         DeliveryRule,
-                        $"В версии {result.Location.Version} нет манифеста выпуска: её выпустили без «{ReleasePreparation.MenuPath}». Без манифеста нельзя проверить, всё ли пришло и не потерялись ли правки.");
+                        $"Проверочная версия: в {result.Location.Version} нет манифеста выпуска, значит это не выпуск, а коммит локации. Смотреть можно, принять и закоммитить нельзя.");
 
                     continue;
                 }
@@ -373,7 +383,11 @@ namespace PaperFly.RenderKit.Acceptance
                         .Where(issue => issue.Severity == ValidationSeverity.Error)
                         .Select(Describe));
 
-                if (!result.IsAccepted)
+                if (result.IsTrial)
+                {
+                    errors.Add($"{result.Location.Name} {result.Location.Version}: подключён коммит локации, а не выпуск. Перед коммитом верните выпущенную версию пакета.");
+                }
+                else if (!result.IsAccepted)
                 {
                     errors.Add($"{result.Location.Name} {result.Location.Version}: версия не принята. Откройте «{MenuPath}», проверьте изменения и нажмите «Принять», затем добавьте {AcceptedManifests.Folder} в коммит.");
                 }

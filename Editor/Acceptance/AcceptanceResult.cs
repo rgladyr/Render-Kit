@@ -61,8 +61,17 @@ namespace PaperFly.RenderKit.Acceptance
         public int WarningCount => this.Issues.Count(issue => issue.Severity == ValidationSeverity.Warning);
 
         /// <summary>
-        /// Версию можно принять: ошибок нет.
+        /// Подключён коммит локации, а не выпуск: манифеста нет или он старого формата.
         /// </summary>
-        public bool CanAccept => this.ErrorCount == 0;
+        public bool IsTrial
+            => this.Location.Manifest == null
+            || this.Location.Manifest.format != ReleaseManifest.CurrentFormat;
+
+        /// <summary>
+        /// Версию можно принять: это выпуск и ошибок нет.
+        /// </summary>
+        public bool CanAccept
+            => !this.IsTrial
+            && this.ErrorCount == 0;
     }
 }
