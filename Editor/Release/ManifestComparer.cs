@@ -5,7 +5,7 @@ using System.Linq;
 namespace PaperFly.RenderKit.Release
 {
     /// <summary>
-    /// Сравнивает манифесты выпуска: что изменилось в основе и совпадает ли записанный манифест с файлами.
+    /// Сравнивает манифесты выпуска: что изменилось в пакете и совпадает ли записанный манифест с файлами.
     /// </summary>
     internal static class ManifestComparer
     {
@@ -15,51 +15,97 @@ namespace PaperFly.RenderKit.Release
 
             return separator < 0
                 ? string.Empty
-                : entry.path.Substring(0, separator);
+                : entry.path.Substring(
+                    0,
+                    separator);
         }
 
         private static string GetGroupKey(ReleaseManifest.ObjectEntry entry)
-            => $"{entry.prefab}|{GetParentPath(entry)}";
+            => $"{entry.guid}|{GetParentPath(entry)}";
 
-        private static HashSet<string> GetKeys(ReleaseManifest manifest)
-            => new HashSet<string>(
-                manifest.objects.Select(entry => $"{entry.prefab}|{entry.fileId}"),
-                StringComparer.Ordinal);
+        private static List<ReleaseManifest.ObjectEntry> GetGameObjects(ReleaseManifest manifest)
+            => manifest.objects
+                .Where(entry => string.Equals(
+                    entry.type,
+                    ReleaseManifest.GameObjectType,
+                    StringComparison.Ordinal))
+                .ToList();
 
         private static List<ReleaseManifest.ObjectEntry> Except(
-            ReleaseManifest source,
-            ReleaseManifest other)
+            IEnumerable<ReleaseManifest.ObjectEntry> source,
+            IEnumerable<ReleaseManifest.ObjectEntry> other)
         {
-            var otherKeys = GetKeys(other);
+            var otherKeys =
+                new HashSet<string>(
+                    other.Select(GetKey),
+                    StringComparer.Ordinal);
 
-            return source.objects
-                .Where(entry => !otherKeys.Contains($"{entry.prefab}|{entry.fileId}"))
+            return source
+                .Where(entry => !otherKeys.Contains(GetKey(entry)))
                 .ToList();
         }
 
         /// <summary>
-        /// Находит объекты основы, которые удалены, добавлены или, вероятно, переименованы с прошлого выпуска.
+        /// Ключ объекта: GUID файла и идентификатор объекта внутри него.
+        /// </summary>
+        /// <param name="entry">Объект манифеста.</param>
+        /// <returns>Ключ, одинаковый у художника и в игре.</returns>
+        public static string GetKey(ReleaseManifest.ObjectEntry entry)
+            => GetKey(
+                entry.guid,
+                entry.fileId);
+
+        /// <summary>
+        /// Ключ объекта по GUID файла и идентификатору объекта внутри него.
+        /// </summary>
+        /// <param name="guid">GUID файла.</param>
+        /// <param name="fileId">Идентификатор объекта внутри файла.</param>
+        /// <returns>Ключ объекта.</returns>
+        public static string GetKey(
+            string guid,
+            long fileId)
+            => $"{guid}|{fileId}";
+
+        /// <summary>
+        /// Описывает объект для сообщения: файл, путь в иерархии и тип, если это не GameObject.
+        /// </summary>
+        /// <param name="entry">Объект манифеста.</param>
+        /// <returns>Например «Location-Art.prefab → Root/Tree (MeshRenderer)».</returns>
+        public static string Describe(ReleaseManifest.ObjectEntry entry)
+            => string.Equals(
+                    entry.type,
+                    ReleaseManifest.GameObjectType,
+                    StringComparison.Ordinal)
+                ? $"{entry.asset} → {entry.path}"
+                : $"{entry.asset} → {entry.path} ({entry.type})";
+
+        /// <summary>
+        /// Находит объекты, которые удалены или, вероятно, переименованы с прошлого выпуска.
         /// </summary>
         /// <param name="previous">Манифест прошлого выпуска.</param>
         /// <param name="current">Манифест текущего состояния.</param>
-        /// <returns>Описания изменений для художника; пустой список, если связи с вариантом не пострадают.</returns>
+        /// <returns>Описания изменений; пустой список, если связи с правками в игре не пострадают.</returns>
         /// <remarks>
-        /// Для Unity переименование — это удаление и создание объекта с новым идентификатором.
+        /// Для Unity переименование в Blender — это удаление и создание объекта с новым идентификатором.
         /// Если под одним родителем пропал ровно один объект и появился ровно один, это считается переименованием.
+        /// Компоненты пропадают вместе со своим объектом, поэтому сравниваются только объекты.
         /// </remarks>
         public static List<string> DescribeObjectChanges(
             ReleaseManifest previous,
             ReleaseManifest current)
         {
+            var previousObjects = GetGameObjects(previous);
+            var currentObjects = GetGameObjects(current);
+
             var removed =
                 Except(
-                    previous,
-                    current);
+                    previousObjects,
+                    currentObjects);
 
             var added =
                 Except(
-                    current,
-                    previous);
+                    currentObjects,
+                    previousObjects);
 
             var changes = new List<string>();
 
@@ -75,13 +121,55 @@ namespace PaperFly.RenderKit.Release
                 if (group.Count() == 1
                  && addedInGroup.Count == 1)
                 {
-                    changes.Add($"Переименован: {group.First().prefab} → {group.First().path} → {addedInGroup[0].path}");
+                    changes.Add($"Переименован: {Describe(group.First())} → {addedInGroup[0].path}");
 
                     continue;
                 }
 
-                changes.AddRange(group.Select(entry => $"Удалён: {entry.prefab} → {entry.path}"));
+                changes.AddRange(group.Select(entry => $"Удалён: {Describe(entry)}"));
             }
+
+            return changes;
+        }
+
+        /// <summary>
+        /// Описывает, какие файлы добавлены, удалены и изменены между версиями.
+        /// </summary>
+        /// <param name="previous">Манифест прошлой версии.</param>
+        /// <param name="current">Манифест новой версии.</param>
+        /// <returns>Описания изменений файлов.</returns>
+        public static List<string> DescribeFileChanges(
+            ReleaseManifest previous,
+            ReleaseManifest current)
+        {
+            var previousHashes =
+                previous.files.ToDictionary(
+                    entry => entry.path,
+                    entry => entry.hash,
+                    StringComparer.Ordinal);
+
+            var changes = new List<string>();
+
+            foreach (var entry in current.files)
+            {
+                if (!previousHashes.TryGetValue(
+                        entry.path,
+                        out var hash))
+                {
+                    changes.Add($"Добавлен файл: {entry.path}");
+                }
+                else if (!string.Equals(
+                             hash,
+                             entry.hash,
+                             StringComparison.Ordinal))
+                {
+                    changes.Add($"Изменён файл: {entry.path}");
+                }
+
+                previousHashes.Remove(entry.path);
+            }
+
+            changes.AddRange(previousHashes.Keys.Select(path => $"Удалён файл: {path}"));
 
             return changes;
         }
@@ -96,21 +184,31 @@ namespace PaperFly.RenderKit.Release
             ReleaseManifest saved,
             ReleaseManifest current)
         {
+            var mismatches = new List<string>();
+
+            if (saved.format != current.format)
+            {
+                mismatches.Add($"Манифест старого формата ({saved.format}, нужен {current.format}).");
+            }
+
             var savedHashes =
                 saved.files.ToDictionary(
                     entry => entry.path,
                     entry => entry.hash,
                     StringComparer.Ordinal);
 
-            var mismatches = new List<string>();
-
             foreach (var entry in current.files)
             {
-                if (!savedHashes.TryGetValue(entry.path, out var hash))
+                if (!savedHashes.TryGetValue(
+                        entry.path,
+                        out var hash))
                 {
                     mismatches.Add($"Файл не описан в манифесте: {entry.path}");
                 }
-                else if (!string.Equals(hash, entry.hash, StringComparison.Ordinal))
+                else if (!string.Equals(
+                             hash,
+                             entry.hash,
+                             StringComparison.Ordinal))
                 {
                     mismatches.Add($"Файл изменён после подготовки выпуска: {entry.path}");
                 }
@@ -120,7 +218,10 @@ namespace PaperFly.RenderKit.Release
 
             mismatches.AddRange(savedHashes.Keys.Select(path => $"Файл удалён после подготовки выпуска: {path}"));
 
-            if (!string.Equals(saved.version, current.version, StringComparison.Ordinal))
+            if (!string.Equals(
+                    saved.version,
+                    current.version,
+                    StringComparison.Ordinal))
             {
                 mismatches.Add($"В манифесте версия {saved.version}, в package.json {current.version}.");
             }
