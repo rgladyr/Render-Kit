@@ -395,12 +395,5 @@ namespace PaperFly.RenderKit.Acceptance
 
             return errors;
         }
-
-        /// <summary>
-        /// Проверяет, подключены ли к проекту пакеты локаций.
-        /// </summary>
-        /// <returns><c>true</c> в проекте игры.</returns>
-        public static bool HasInstalledLocations()
-            => InstalledLocation.FindAll().Count > 0;
     }
 }

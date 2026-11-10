@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 
+using PaperFly.RenderKit.Acceptance;
 using PaperFly.RenderKit.Validation.Materials;
 
 using UnityEditor;
@@ -510,9 +511,11 @@ namespace PaperFly.RenderKit.Validation
         {
             using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
             {
-                if (GUILayout.Button(
-                    "Проверить локации заново",
-                    EditorStyles.toolbarButton))
+                // В игре пакет локации только для чтения: перепроверять и привязывать материалы там незачем.
+                if (ProjectRole.HasLocationTools
+                 && GUILayout.Button(
+                        "Проверить локации заново",
+                        EditorStyles.toolbarButton))
                 {
                     LocationScanner.ValidateAll();
                 }
@@ -524,11 +527,20 @@ namespace PaperFly.RenderKit.Validation
                     ValidationReport.Clear();
                 }
 
-                if (GUILayout.Button(
-                    "Материалы моделей",
-                    EditorStyles.toolbarButton))
+                if (ProjectRole.HasLocationTools
+                 && GUILayout.Button(
+                        "Материалы моделей",
+                        EditorStyles.toolbarButton))
                 {
                     MaterialBindingWindow.Open();
+                }
+
+                if (ProjectRole.HasGameTools
+                 && GUILayout.Button(
+                        "Приём локаций",
+                        EditorStyles.toolbarButton))
+                {
+                    AcceptanceWindow.Open();
                 }
 
                 if (GUILayout.Button(

@@ -1,8 +1,6 @@
 using System;
 using System.IO;
 
-using PaperFly.RenderKit.Acceptance;
-
 using UnityEditor;
 
 using UnityEngine;
@@ -88,7 +86,7 @@ namespace PaperFly.RenderKit.Release
                 return;
             }
 
-            if (HasSourcePackage())
+            if (ProjectRole.IsLocationProject)
             {
                 InstallHook(
                     hooksFolder,
@@ -97,7 +95,7 @@ namespace PaperFly.RenderKit.Release
                     PushMarker);
             }
 
-            if (AcceptanceChecks.HasInstalledLocations())
+            if (ProjectRole.IsGameProject)
             {
                 InstallHook(
                     hooksFolder,
@@ -158,14 +156,6 @@ namespace PaperFly.RenderKit.Release
                 hookPath + ".backup",
                 true);
         }
-
-        private static bool HasSourcePackage()
-            => Directory
-                .GetFiles(
-                    "Assets",
-                    "package.json",
-                    SearchOption.AllDirectories)
-                .Length > 0;
 
         private static string GetScriptPath()
         {
