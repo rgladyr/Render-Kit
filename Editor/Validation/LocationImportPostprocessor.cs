@@ -1,6 +1,8 @@
 using System.Collections.Generic;
 using System.Linq;
 
+using PaperFly.RenderKit.Validation.Materials;
+
 using UnityEditor;
 using UnityEditor.Presets;
 
@@ -55,6 +57,8 @@ namespace PaperFly.RenderKit.Validation
                 EditorApplication.delayCall -= ValidationWindow.ShowWithoutFocus;
                 EditorApplication.delayCall += ValidationWindow.ShowWithoutFocus;
             }
+
+            MaterialBindingWindow.OfferFor(locationAssets.Where(path => AssetImporter.GetAtPath(path) is ModelImporter));
         }
 
         private void ApplyPreset(string presetPath)

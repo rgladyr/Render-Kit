@@ -50,6 +50,11 @@ namespace PaperFly.RenderKit.Validation
             /// Проверяет все локации проекта заново.
             /// </summary>
             internal const string ValidateLocations = "PaperFly/Валидация/Проверить локации";
+
+            /// <summary>
+            /// Открывает окно привязки материалов моделей.
+            /// </summary>
+            internal const string Materials = "PaperFly/Валидация/Материалы моделей";
         }
 
         /// <summary>

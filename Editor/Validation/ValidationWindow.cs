@@ -4,6 +4,8 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 
+using PaperFly.RenderKit.Validation.Materials;
+
 using UnityEditor;
 
 using UnityEngine;
@@ -520,6 +522,13 @@ namespace PaperFly.RenderKit.Validation
                     EditorStyles.toolbarButton))
                 {
                     ValidationReport.Clear();
+                }
+
+                if (GUILayout.Button(
+                    "Материалы моделей",
+                    EditorStyles.toolbarButton))
+                {
+                    MaterialBindingWindow.Open();
                 }
 
                 if (GUILayout.Button(
