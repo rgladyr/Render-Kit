@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 
+using PaperFly.RenderKit.Acceptance;
 using PaperFly.RenderKit.Validation;
 
 using UnityEditor;
@@ -12,7 +13,8 @@ using UnityEngine;
 namespace PaperFly.RenderKit.Release
 {
     /// <summary>
-    /// Выполняет проверку перед отправкой по запросу хука pre-push: в открытой Unity или при запуске из командной строки.
+    /// Выполняет проверку по запросу git-хука в открытой Unity или при запуске из командной строки:
+    /// перед отправкой у художников (pre-push) и при коммите новой версии локации в игре (pre-commit).
     /// </summary>
     [InitializeOnLoad]
     internal static class ReleaseGate
@@ -23,9 +25,13 @@ namespace PaperFly.RenderKit.Release
 
         private const string ResultPath = RootPath + "/result.txt";
 
-        private const string LogPrefix = "[Проверка перед отправкой]";
+        private const string PushPrefix = "[Проверка перед отправкой]";
+
+        private const string AcceptancePrefix = "[Проверка приёма локаций]";
 
         private const string ReleaseMode = "release";
+
+        private const string AcceptMode = "accept";
 
         private const double PollIntervalSeconds = 0.5;
 
@@ -55,25 +61,39 @@ namespace PaperFly.RenderKit.Release
 
         private static bool HandleRequest()
         {
-            // Первая строка запроса — его номер, вторая — release, если отправляется тег версии.
+            // Первая строка запроса — его номер, вторая — режим: push, release при отправке тега версии
+            // или accept при коммите новой версии локации в игре.
             var request = File.ReadAllLines(RequestPath);
             File.Delete(RequestPath);
 
             var requestId = request[0].Trim();
-            var isRelease =
+
+            var mode =
                 request.Length > 1
-             && string.Equals(
-                    request[1].Trim(),
-                    ReleaseMode,
+                    ? request[1].Trim()
+                    : string.Empty;
+
+            var isAcceptance =
+                string.Equals(
+                    mode,
+                    AcceptMode,
                     StringComparison.Ordinal);
 
-            var errors = ReleaseChecks.Run(isRelease);
+            var errors =
+                isAcceptance
+                    ? AcceptanceChecks.RunForGate()
+                    : ReleaseChecks.Run(string.Equals(
+                        mode,
+                        ReleaseMode,
+                        StringComparison.Ordinal));
 
             WriteResult(
                 requestId,
                 errors);
 
-            Report(errors);
+            Report(
+                errors,
+                isAcceptance);
 
             return errors.Count == 0;
         }
@@ -99,8 +119,20 @@ namespace PaperFly.RenderKit.Release
                 ResultPath);
         }
 
-        private static void Report(IReadOnlyList<string> errors)
+        private static void Report(
+            IReadOnlyList<string> errors,
+            bool isAcceptance)
         {
+            var prefix =
+                isAcceptance
+                    ? AcceptancePrefix
+                    : PushPrefix;
+
+            var action =
+                isAcceptance
+                    ? "коммит"
+                    : "отправку";
+
             var warnings = ValidationReport.GetAll().FindAll(issue => issue.Severity == ValidationSeverity.Warning);
 
             if (warnings.Count > 0)
@@ -111,21 +143,27 @@ namespace PaperFly.RenderKit.Release
                         .OrderByDescending(group => group.Count())
                         .Select(group => $"{group.Key}: {group.Count()}");
 
-                Debug.LogWarning($"{LogPrefix} Предупреждений: {warnings.Count} ({string.Join("; ", byRule)}), отправку они не останавливают.");
+                Debug.LogWarning($"{prefix} Предупреждений: {warnings.Count} ({string.Join("; ", byRule)}), {action} они не останавливают.");
             }
 
             if (errors.Count == 0)
             {
-                Debug.Log($"{LogPrefix} Ошибок нет, отправка разрешена.");
+                Debug.Log(
+                    isAcceptance
+                        ? $"{prefix} Ошибок нет, коммит разрешён."
+                        : $"{prefix} Ошибок нет, отправка разрешена.");
 
                 return;
             }
 
-            Debug.LogError($"{LogPrefix} Отправка отменена, ошибок: {errors.Count}.");
+            Debug.LogError(
+                isAcceptance
+                    ? $"{prefix} Коммит отменён, ошибок: {errors.Count}."
+                    : $"{prefix} Отправка отменена, ошибок: {errors.Count}.");
 
             foreach (var error in errors)
             {
-                Debug.LogError($"{LogPrefix} {error}");
+                Debug.LogError($"{prefix} {error}");
             }
 
             if (!Application.isBatchMode)

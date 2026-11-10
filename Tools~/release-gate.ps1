@@ -16,6 +16,10 @@ Unity проверяет проект в том виде, в каком он о�
 Отправляемые ссылки в виде «ссылка:объект», которые передаёт хук. Если среди них есть тег,
 проверка идёт в режиме выпуска: манифест выпуска должен быть записан и совпадать с файлами.
 
+.PARAMETER Mode
+accept — проверка приёма в игре, её вызывает хук pre-commit, когда в коммит попадает новая версия пакета
+локации. Подключённые версии должны пройти проверку и быть приняты в окне «Приём локаций».
+
 .PARAMETER TimeoutSeconds
 Сколько ждать ответа открытой Unity.
 #>
@@ -23,6 +27,8 @@ Unity проверяет проект в том виде, в каком он о�
 param(
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]] $PushedRefs,
+
+    [string] $Mode = '',
 
     [int] $TimeoutSeconds = 180
 )
@@ -155,11 +161,20 @@ function Invoke-BatchEditor([string] $project, [string] $resultPath) {
 $project = (git rev-parse --show-toplevel).Replace('/', '\')
 Set-Location $project
 
-Write-Host "Проверка локации перед отправкой..."
+$isAcceptance = $Mode -eq 'accept'
+$cancelled = 'push отменён'
 
-$mode = 'push'
+if ($isAcceptance) {
+    $mode = 'accept'
+    $cancelled = 'коммит отменён'
+    Write-Host "В коммите новая версия пакетов: проверка приёма локаций..."
+}
+else {
+    $mode = 'push'
+    Write-Host "Проверка локации перед отправкой..."
+}
 
-if ($PushedRefs) {
+if ($PushedRefs -and -not $isAcceptance) {
     if (@($PushedRefs | Where-Object { $_ -like 'refs/tags/*' }).Count -gt 0) {
         $mode = 'release'
         Write-Host "Отправляется тег: проверка в режиме выпуска."
@@ -213,7 +228,7 @@ if ($lines[1] -eq 'OK') {
     exit 0
 }
 
-Write-Host "Проверка не пройдена ($seconds с), push отменён. Подробности в консоли Unity и окне отчёта:"
+Write-Host "Проверка не пройдена ($seconds с), $cancelled. Подробности в консоли Unity и окне отчёта:"
 $lines | Select-Object -Skip 2 | ForEach-Object { Write-Host "  - $_" }
 
 exit 1

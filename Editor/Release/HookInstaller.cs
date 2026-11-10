@@ -1,6 +1,8 @@
 using System;
 using System.IO;
 
+using PaperFly.RenderKit.Acceptance;
+
 using UnityEditor;
 
 using UnityEngine;
@@ -10,23 +12,30 @@ using PackageInfo = UnityEditor.PackageManager.PackageInfo;
 namespace PaperFly.RenderKit.Release
 {
     /// <summary>
-    /// Ставит хук pre-push в репозиторий проекта с пакетом локации при каждом открытии проекта.
+    /// Ставит git-хуки проверки при каждом открытии проекта. Какой хук нужен, определяется по тому, где лежит пакет локации.
     /// </summary>
     /// <remarks>
-    /// Git не хранит хуки в репозитории, поэтому без установщика каждому художнику пришлось бы ставить хук вручную.
+    /// <para>Пакет лежит в Assets исходниками — это проект художников: хук pre-push запускает проверку перед отправкой.</para>
+    /// <para>Пакет подключён через Packages/manifest.json и в нём есть манифест выпуска — это проект игры:
+    /// хук pre-commit запускает проверку приёма, когда в коммит попадает новая версия пакета.</para>
+    /// <para>Git не хранит хуки в репозитории, поэтому без установщика каждому пришлось бы ставить их вручную.</para>
     /// </remarks>
     [InitializeOnLoad]
     internal static class HookInstaller
     {
-        private const string Marker = "# PaperFly Render Kit: проверка перед отправкой";
+        private const string PushMarker = "# PaperFly Render Kit: проверка перед отправкой";
+
+        private const string CommitMarker = "# PaperFly Render Kit: проверка приёма локаций";
 
         private const string ScriptRelativePath = "Tools~/release-gate.ps1";
 
+        private const string Notice = "# Файл создаётся Render Kit при открытии проекта, правки будут перезаписаны.\n";
+
         // Хук LFS отправляет модели и текстуры на сервер, поэтому его вызов сохраняется после проверки.
-        private const string Template =
+        private const string PushTemplate =
             "#!/bin/sh\n"
-          + Marker + "\n"
-          + "# Файл создаётся Render Kit при открытии проекта, правки будут перезаписаны.\n"
+          + PushMarker + "\n"
+          + Notice
           + "\n"
           + "refs=$(cat)\n"
           + "\n"
@@ -41,6 +50,19 @@ namespace PaperFly.RenderKit.Release
           + "\n"
           + "command -v git-lfs >/dev/null 2>&1 || { printf >&2 \"\\nНе найден git-lfs: модели и текстуры не будут отправлены.\\n\\n\"; exit 2; }\n"
           + "printf '%s\\n' \"$refs\" | git lfs pre-push \"$@\"\n";
+
+        // Версия пакета меняется только через манифест и lock-файл, остальные коммиты проверка не задерживает.
+        private const string CommitTemplate =
+            "#!/bin/sh\n"
+          + CommitMarker + "\n"
+          + Notice
+          + "\n"
+          + "changed=$(git diff --cached --name-only -- Packages/manifest.json Packages/packages-lock.json)\n"
+          + "\n"
+          + "if [ -n \"$changed\" ]\n"
+          + "then\n"
+          + "  powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"{SCRIPT}\" -Mode accept || exit 1\n"
+          + "fi\n";
 
         static HookInstaller()
         {
@@ -61,19 +83,43 @@ namespace PaperFly.RenderKit.Release
                     ".git",
                     "hooks");
 
-            if (!Directory.Exists(hooksFolder)
-             || !HasLocationPackage())
+            if (!Directory.Exists(hooksFolder))
             {
                 return;
             }
 
+            if (HasSourcePackage())
+            {
+                InstallHook(
+                    hooksFolder,
+                    "pre-push",
+                    PushTemplate,
+                    PushMarker);
+            }
+
+            if (AcceptanceChecks.HasInstalledLocations())
+            {
+                InstallHook(
+                    hooksFolder,
+                    "pre-commit",
+                    CommitTemplate,
+                    CommitMarker);
+            }
+        }
+
+        private static void InstallHook(
+            string hooksFolder,
+            string hookName,
+            string template,
+            string marker)
+        {
             var hookPath =
                 Path.Combine(
                     hooksFolder,
-                    "pre-push");
+                    hookName);
 
             var content =
-                Template.Replace(
+                template.Replace(
                     "{SCRIPT}",
                     GetScriptPath());
 
@@ -86,19 +132,23 @@ namespace PaperFly.RenderKit.Release
                 return;
             }
 
-            KeepForeignHook(hookPath);
+            KeepForeignHook(
+                hookPath,
+                marker);
 
             File.WriteAllText(
                 hookPath,
                 content);
 
-            Debug.Log($"Render Kit: установлен хук проверки перед отправкой ({hookPath}).");
+            Debug.Log($"Render Kit: установлен хук {hookName} ({hookPath}).");
         }
 
-        private static void KeepForeignHook(string hookPath)
+        private static void KeepForeignHook(
+            string hookPath,
+            string marker)
         {
             if (!File.Exists(hookPath)
-             || File.ReadAllText(hookPath).Contains(Marker))
+             || File.ReadAllText(hookPath).Contains(marker))
             {
                 return;
             }
@@ -109,7 +159,7 @@ namespace PaperFly.RenderKit.Release
                 true);
         }
 
-        private static bool HasLocationPackage()
+        private static bool HasSourcePackage()
             => Directory
                 .GetFiles(
                     "Assets",

@@ -59,6 +59,23 @@ namespace PaperFly.RenderKit.Validation
         }
 
         /// <summary>
+        /// Удаляет проблемы, найденные указанными правилами, во всех файлах.
+        /// </summary>
+        /// <param name="rules">Названия правил.</param>
+        public static void RemoveRules(ICollection<string> rules)
+        {
+            lock (SyncRoot)
+            {
+                foreach (var issues in IssuesByAsset.Values)
+                {
+                    issues.RemoveAll(issue => rules.Contains(issue.Rule));
+                }
+            }
+
+            Changed?.Invoke();
+        }
+
+        /// <summary>
         /// Удаляет проблемы файла.
         /// </summary>
         /// <param name="assetPath">Путь к файлу.</param>
