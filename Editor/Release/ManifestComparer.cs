@@ -133,6 +133,20 @@ namespace PaperFly.RenderKit.Release
         }
 
         /// <summary>
+        /// Проверяет, появились ли новые объекты с прошлого выпуска.
+        /// </summary>
+        /// <param name="previous">Манифест прошлого выпуска.</param>
+        /// <param name="current">Манифест текущего состояния.</param>
+        /// <returns><c>true</c>, если в текущем манифесте есть объекты, которых не было.</returns>
+        public static bool HasAddedObjects(
+            ReleaseManifest previous,
+            ReleaseManifest current)
+            => Except(
+                    GetGameObjects(current),
+                    GetGameObjects(previous))
+                .Count > 0;
+
+        /// <summary>
         /// Описывает, какие файлы добавлены, удалены и изменены между версиями.
         /// </summary>
         /// <param name="previous">Манифест прошлой версии.</param>
