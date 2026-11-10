@@ -211,7 +211,7 @@ namespace PaperFly.RenderKit.Acceptance
                         StringComparer.Ordinal);
 
             var previousFiles =
-                (result.Accepted?.files ?? new List<ReleaseManifest.FileEntry>())
+                GetFiles(result.Accepted)
                     .Where(entry => !string.IsNullOrEmpty(entry.guid))
                     .GroupBy(
                         entry => entry.guid,
@@ -294,6 +294,9 @@ namespace PaperFly.RenderKit.Acceptance
             }
         }
 
+        private static IEnumerable<ReleaseManifest.FileEntry> GetFiles(ReleaseManifest manifest)
+            => manifest?.files ?? Enumerable.Empty<ReleaseManifest.FileEntry>();
+
         private static string Describe(ValidationIssue issue)
             => $"{issue.AssetPath}: [{issue.Rule}] {issue.Message}";
 
@@ -318,7 +321,7 @@ namespace PaperFly.RenderKit.Acceptance
             var guids =
                 new HashSet<string>(
                     results
-                        .SelectMany(result => result.Location.Manifest.files.Concat(result.Accepted?.files ?? new List<ReleaseManifest.FileEntry>()))
+                        .SelectMany(result => GetFiles(result.Location.Manifest).Concat(GetFiles(result.Accepted)))
                         .Select(entry => entry.guid)
                         .Where(guid => !string.IsNullOrEmpty(guid)),
                     StringComparer.Ordinal);
@@ -330,6 +333,18 @@ namespace PaperFly.RenderKit.Acceptance
 
             foreach (var result in results)
             {
+                if (result.Location.Manifest == null)
+                {
+                    AddIssue(
+                        result,
+                        ValidationSeverity.Error,
+                        result.Location.AssetFolder,
+                        DeliveryRule,
+                        $"В версии {result.Location.Version} нет манифеста выпуска: её выпустили без «{ReleasePreparation.MenuPath}». Без манифеста нельзя проверить, всё ли пришло и не потерялись ли правки.");
+
+                    continue;
+                }
+
                 CheckVersions(result);
                 CheckDelivery(result);
 

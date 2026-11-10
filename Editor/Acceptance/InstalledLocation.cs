@@ -4,15 +4,19 @@ using System.Linq;
 
 using PaperFly.RenderKit.Release;
 
+using UnityEditor.PackageManager;
+
 using PackageInfo = UnityEditor.PackageManager.PackageInfo;
 
 namespace PaperFly.RenderKit.Acceptance
 {
     /// <summary>
-    /// Пакет локации, подключённый к игре через Packages/manifest.json: в нём лежит манифест выпуска.
+    /// Пакет локации, подключённый к игре через Packages/manifest.json.
     /// </summary>
     internal sealed class InstalledLocation
     {
+        private const string LocationsFolder = "Locations";
+
         private InstalledLocation(PackageInfo package)
         {
             this.Name = package.name;
@@ -53,20 +57,36 @@ namespace PaperFly.RenderKit.Acceptance
         public string ManifestPath { get; }
 
         /// <summary>
-        /// Манифест выпуска, пришедший с пакетом.
+        /// Манифест выпуска, пришедший с пакетом; <c>null</c>, если версию выпустили без подготовки выпуска.
         /// </summary>
         public ReleaseManifest Manifest { get; }
+
+        // Пакет без манифеста тоже считается локацией, если в нём есть папка Locations, как на этапе импорта:
+        // иначе версия, выпущенная без подготовки, просто пропала бы из приёма.
+        private static bool IsLocationPackage(PackageInfo package)
+            => package.source != PackageSource.Registry
+            && package.source != PackageSource.BuiltIn
+            && !string.IsNullOrEmpty(package.resolvedPath)
+            && Directory.Exists(package.resolvedPath)
+            && (File.Exists(
+                    Path.Combine(
+                        package.resolvedPath,
+                        ReleaseManifest.FileName))
+             || Directory
+                    .EnumerateDirectories(
+                        package.resolvedPath,
+                        LocationsFolder,
+                        SearchOption.AllDirectories)
+                    .Any());
 
         /// <summary>
         /// Находит все подключённые пакеты локаций.
         /// </summary>
-        /// <returns>Пакеты, в которых есть манифест выпуска.</returns>
+        /// <returns>Пакеты с манифестом выпуска или папкой Locations.</returns>
         public static List<InstalledLocation> FindAll()
             => PackageInfo
                 .GetAllRegisteredPackages()
-                .Where(package => File.Exists(Path.Combine(
-                    package.resolvedPath,
-                    ReleaseManifest.FileName)))
+                .Where(IsLocationPackage)
                 .Select(package => new InstalledLocation(package))
                 .ToList();
     }

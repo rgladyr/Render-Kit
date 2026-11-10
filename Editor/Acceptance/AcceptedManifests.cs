@@ -41,6 +41,7 @@ namespace PaperFly.RenderKit.Acceptance
             var path = GetPath(location.Name);
 
             return File.Exists(path)
+                && File.Exists(location.ManifestPath)
                 && string.Equals(
                     ManifestBuilder.Hash(path),
                     ManifestBuilder.Hash(location.ManifestPath),
