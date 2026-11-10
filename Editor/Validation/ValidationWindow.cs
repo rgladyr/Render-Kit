@@ -7,11 +7,13 @@ using System.Linq;
 using UnityEditor;
 
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace PaperFly.RenderKit.Validation
 {
     /// <summary>
-    /// Окно отчёта: каждая проблема отдельным блоком, клик по блоку копирует её в буфер обмена.
+    /// Окно отчёта: каждая проблема отдельным блоком. Выделение работает как в консоли Unity: клик выделяет
+    /// проблему и её объект, Ctrl и Shift добавляют к выделению, Ctrl+C копирует выделенные проблемы.
     /// Список сортируется по объекту, ошибке или дате и фильтруется по уровню и объекту.
     /// </summary>
     internal sealed class ValidationWindow : EditorWindow
@@ -34,6 +36,17 @@ namespace PaperFly.RenderKit.Validation
 
         private const string ClipboardSeparator = "\n\n";
 
+        private const string CopyCommand = "Copy";
+
+        private const string SelectAllCommand = "SelectAll";
+
+        private static readonly Color SelectionColor =
+            new Color(
+                0.24f,
+                0.48f,
+                0.9f,
+                0.35f);
+
         private static readonly (IssueSortColumn Column, string Title)[] SortColumns =
         {
             (IssueSortColumn.Object, "Объект"),
@@ -46,6 +59,8 @@ namespace PaperFly.RenderKit.Validation
         private readonly List<ValidationIssue> rows = new List<ValidationIssue>();
 
         private readonly List<float> rowHeights = new List<float>();
+
+        private readonly HashSet<ValidationIssue> selectedIssues = new HashSet<ValidationIssue>();
 
         [SerializeField]
         private bool showErrors = true;
@@ -76,6 +91,9 @@ namespace PaperFly.RenderKit.Validation
         private float contentHeight;
 
         private Vector2 scrollPosition;
+
+        // Строка, от которой Shift выделяет диапазон.
+        private int anchorIndex = -1;
 
         /// <summary>
         /// Открывает окно и переводит на него фокус.
@@ -159,6 +177,81 @@ namespace PaperFly.RenderKit.Validation
 
             Selection.activeObject = asset;
             EditorGUIUtility.PingObject(asset);
+        }
+
+        // Объект проблемы: экземпляры в открытых сценах, если они есть, иначе объект внутри файла,
+        // а если путь к объекту не указан или не найден — сам файл.
+        private static IEnumerable<UnityEngine.Object> FindTargets(ValidationIssue issue)
+        {
+            var asset = AssetDatabase.LoadMainAssetAtPath(issue.AssetPath);
+
+            if (asset == null)
+            {
+                return Array.Empty<UnityEngine.Object>();
+            }
+
+            var assetObject = FindAssetObject(issue);
+
+            if (assetObject == null)
+            {
+                return new[] { asset };
+            }
+
+            var instances = FindSceneInstances(assetObject);
+
+            return instances.Count > 0
+                ? instances
+                : new UnityEngine.Object[] { assetObject };
+        }
+
+        private static GameObject FindAssetObject(ValidationIssue issue)
+        {
+            if (string.IsNullOrEmpty(issue.ObjectPath)
+             || !(AssetDatabase.LoadMainAssetAtPath(issue.AssetPath) is GameObject root))
+            {
+                return null;
+            }
+
+            var target =
+                ModelHierarchy
+                    .GetAll(root)
+                    .FirstOrDefault(
+                        transform => string.Equals(
+                            ModelHierarchy.GetPath(
+                                transform,
+                                root.transform),
+                            issue.ObjectPath,
+                            StringComparison.Ordinal));
+
+            return target == null
+                ? null
+                : target.gameObject;
+        }
+
+        private static List<UnityEngine.Object> FindSceneInstances(GameObject assetObject)
+        {
+            var instances = new List<UnityEngine.Object>();
+
+            for (var index = 0; index < SceneManager.sceneCount; index++)
+            {
+                var scene = SceneManager.GetSceneAt(index);
+
+                if (!scene.isLoaded)
+                {
+                    continue;
+                }
+
+                foreach (var root in scene.GetRootGameObjects())
+                {
+                    instances.AddRange(
+                        ModelHierarchy
+                            .GetAll(root)
+                            .Where(transform => PrefabUtility.GetCorrespondingObjectFromOriginalSource(transform.gameObject) == assetObject)
+                            .Select(transform => transform.gameObject));
+                }
+            }
+
+            return instances;
         }
 
         private static int Compare(
@@ -356,6 +449,7 @@ namespace PaperFly.RenderKit.Validation
                 this.RebuildRows();
             }
 
+            this.HandleCommands();
             this.DrawToolbar();
 
             if (!this.hasIssues)
@@ -400,6 +494,10 @@ namespace PaperFly.RenderKit.Validation
             this.rows.Clear();
             this.rows.AddRange(searched.Where(this.MatchesSeverity));
             this.rows.Sort(this.CompareRows);
+
+            // Выделение остаётся только у проблем, которые по-прежнему видны.
+            this.selectedIssues.IntersectWith(this.rows);
+            this.anchorIndex = -1;
 
             this.rowHeights.Clear();
             this.measuredWidth = 0f;
@@ -566,7 +664,7 @@ namespace PaperFly.RenderKit.Validation
 
                     this.DrawIssue(
                         rowRect,
-                        this.rows[index]);
+                        index);
                 }
 
                 top += height;
@@ -602,12 +700,12 @@ namespace PaperFly.RenderKit.Validation
             this.measuredWidth = rowWidth;
         }
 
-        // Клик по свободному месту блока копирует проблему; клик по имени файла выделяет файл,
-        // потому что кнопка забирает событие раньше блока.
         private void DrawIssue(
             Rect row,
-            ValidationIssue issue)
+            int index)
         {
+            var issue = this.rows[index];
+
             var block =
                 new Rect(
                     row.x + BlockMargin,
@@ -619,6 +717,13 @@ namespace PaperFly.RenderKit.Validation
                 block,
                 GUIContent.none,
                 EditorStyles.helpBox);
+
+            if (this.selectedIssues.Contains(issue))
+            {
+                EditorGUI.DrawRect(
+                    block,
+                    SelectionColor);
+            }
 
             var line =
                 new Rect(
@@ -659,24 +764,161 @@ namespace PaperFly.RenderKit.Validation
 
             this.HandleBlockClick(
                 block,
-                issue);
+                index);
         }
 
+        // Как в консоли Unity: клик выделяет строку, Ctrl — добавляет или убирает её, Shift — выделяет диапазон,
+        // двойной клик открывает файл. Клик по имени файла забирает кнопка заголовка, он выделяет сам файл.
         private void HandleBlockClick(
             Rect block,
-            ValidationIssue issue)
+            int index)
         {
-            EditorGUIUtility.AddCursorRect(
-                block,
-                MouseCursor.Link);
+            var current = Event.current;
 
-            if (Event.current.type == EventType.MouseDown
-             && block.Contains(Event.current.mousePosition))
+            if (current.type != EventType.MouseDown
+             || current.button != 0
+             || !block.Contains(current.mousePosition))
             {
-                this.Copy(FormatForClipboard(issue));
-                Event.current.Use();
+                return;
+            }
+
+            var issue = this.rows[index];
+
+            if (current.clickCount == 2)
+            {
+                AssetDatabase.OpenAsset(AssetDatabase.LoadMainAssetAtPath(issue.AssetPath));
+            }
+            else if (current.shift
+                  && this.anchorIndex >= 0)
+            {
+                this.SelectRange(index);
+            }
+            else if (EditorGUI.actionKey)
+            {
+                this.ToggleSelection(index);
+            }
+            else
+            {
+                this.selectedIssues.Clear();
+                this.selectedIssues.Add(issue);
+                this.anchorIndex = index;
+            }
+
+            this.SelectTargets();
+            current.Use();
+            this.Repaint();
+        }
+
+        private void SelectRange(int index)
+        {
+            var from =
+                Mathf.Min(
+                    this.anchorIndex,
+                    index);
+
+            var to =
+                Mathf.Max(
+                    this.anchorIndex,
+                    index);
+
+            this.selectedIssues.Clear();
+
+            for (var rowIndex = from; rowIndex <= to; rowIndex++)
+            {
+                this.selectedIssues.Add(this.rows[rowIndex]);
             }
         }
+
+        private void ToggleSelection(int index)
+        {
+            var issue = this.rows[index];
+
+            if (!this.selectedIssues.Remove(issue))
+            {
+                this.selectedIssues.Add(issue);
+            }
+
+            this.anchorIndex = index;
+        }
+
+        private void SelectTargets()
+        {
+            var targets =
+                this.GetSelectedRows()
+                    .SelectMany(FindTargets)
+                    .Distinct()
+                    .ToArray();
+
+            Selection.objects = targets;
+
+            if (targets.Length > 0)
+            {
+                EditorGUIUtility.PingObject(targets[0]);
+            }
+        }
+
+        // Ctrl+C копирует выделенные проблемы в порядке списка, Ctrl+A выделяет все видимые.
+        private void HandleCommands()
+        {
+            var current = Event.current;
+
+            if (current.type != EventType.ValidateCommand
+             && current.type != EventType.ExecuteCommand)
+            {
+                return;
+            }
+
+            var isCopy =
+                string.Equals(
+                    current.commandName,
+                    CopyCommand,
+                    StringComparison.Ordinal);
+
+            var isSelectAll =
+                string.Equals(
+                    current.commandName,
+                    SelectAllCommand,
+                    StringComparison.Ordinal);
+
+            if (!isCopy
+             && !isSelectAll)
+            {
+                return;
+            }
+
+            if (current.type == EventType.ExecuteCommand)
+            {
+                if (isCopy)
+                {
+                    this.CopySelected();
+                }
+                else
+                {
+                    this.selectedIssues.UnionWith(this.rows);
+                    this.Repaint();
+                }
+            }
+
+            current.Use();
+        }
+
+        private void CopySelected()
+        {
+            var selected = this.GetSelectedRows().ToList();
+
+            if (selected.Count == 0)
+            {
+                return;
+            }
+
+            this.Copy(
+                string.Join(
+                    ClipboardSeparator,
+                    selected.Select(FormatForClipboard)));
+        }
+
+        private IEnumerable<ValidationIssue> GetSelectedRows()
+            => this.rows.Where(this.selectedIssues.Contains);
 
         private int CompareRows(
             ValidationIssue first,
