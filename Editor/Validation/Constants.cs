@@ -105,11 +105,6 @@ namespace PaperFly.RenderKit.Validation
             internal const string LodPattern = @"^(?<base>.+)_LOD(?<level>\d+)$";
 
             /// <summary>
-            /// Версия в имени файла: Childhood.v2, Wall_v1.
-            /// </summary>
-            internal const string VersionPattern = @"[._\- ]v\d+";
-
-            /// <summary>
             /// Последний код символа ASCII.
             /// </summary>
             internal const int MaxAsciiCode = 127;

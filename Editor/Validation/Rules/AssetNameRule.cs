@@ -1,12 +1,11 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text.RegularExpressions;
 
 namespace PaperFly.RenderKit.Validation
 {
     /// <summary>
-    /// Проверяет имя файла модели или текстуры: без версии, без пробелов и без символов вне ASCII.
+    /// Проверяет имя файла модели или текстуры: без пробелов и без символов вне ASCII.
     /// </summary>
     internal static class AssetNameRule
     {
@@ -14,12 +13,6 @@ namespace PaperFly.RenderKit.Validation
         /// Название проверки в отчёте.
         /// </summary>
         public const string Title = "Имя файла";
-
-        // Unity компилирует на C# 9 без генераторов регулярных выражений, поэтому GeneratedRegex недоступен.
-        private static readonly Regex VersionName =
-            new Regex(
-                Constants.Names.VersionPattern,
-                RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         /// <summary>
         /// Проверяет имя файла и добавляет найденные проблемы.
@@ -30,15 +23,8 @@ namespace PaperFly.RenderKit.Validation
             string assetPath,
             ICollection<ValidationIssue> issues)
         {
+            // Версия в имени (Childhood.v2) разрешена: по принятому правилу модели маркируются версиями.
             var fileName = Path.GetFileNameWithoutExtension(assetPath);
-
-            if (VersionName.IsMatch(fileName))
-            {
-                issues.Add(
-                    CreateIssue(
-                        assetPath,
-                        $"Версия в имени файла «{fileName}». Версию задаёт выпуск, а не имя."));
-            }
 
             if (fileName.Any(char.IsWhiteSpace))
             {
