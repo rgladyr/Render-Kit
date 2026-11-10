@@ -5,6 +5,8 @@ using System.Linq;
 
 using PaperFly.RenderKit.Validation;
 
+using UnityEditor;
+
 using UnityEngine;
 
 namespace PaperFly.RenderKit.Release
@@ -22,7 +24,15 @@ namespace PaperFly.RenderKit.Release
 
         private const string LfsFilter = "filter=lfs";
 
-        private static void CheckManifest(
+        private const string PackageRule = "Устройство пакета";
+
+        private const string ReferenceRule = "Ссылка вне пакета";
+
+        private const string ManifestRule = "Манифест выпуска";
+
+        private const string PrepareHint = "Выполните «" + ReleasePreparation.MenuPath + "» и закоммитьте манифест.";
+
+        private static LocationPackage ReadPackage(
             string manifestPath,
             List<string> errors)
         {
@@ -30,13 +40,26 @@ namespace PaperFly.RenderKit.Release
 
             if (string.IsNullOrWhiteSpace(manifest.name))
             {
-                errors.Add($"{manifestPath}: не указано имя пакета (name).");
+                AddError(
+                    errors,
+                    manifestPath,
+                    PackageRule,
+                    "Не указано имя пакета (name).");
             }
 
             if (string.IsNullOrWhiteSpace(manifest.version))
             {
-                errors.Add($"{manifestPath}: не указана версия пакета (version).");
+                AddError(
+                    errors,
+                    manifestPath,
+                    PackageRule,
+                    "Не указана версия пакета (version).");
             }
+
+            return new LocationPackage(
+                ToUnityPath(Path.GetDirectoryName(manifestPath)),
+                manifest.name,
+                manifest.version);
         }
 
         // Unity при подключении пакета выкладывает только его папку, без корня репозитория.
@@ -45,14 +68,15 @@ namespace PaperFly.RenderKit.Release
             string packageFolder,
             List<string> errors)
         {
-            var attributesPath =
-                Path.Combine(
-                    packageFolder,
-                    AttributesFileName);
+            var attributesPath = $"{packageFolder}/{AttributesFileName}";
 
             if (!File.Exists(attributesPath))
             {
-                errors.Add($"{packageFolder}: нет файла {AttributesFileName} с правилами LFS.");
+                AddError(
+                    errors,
+                    packageFolder,
+                    PackageRule,
+                    $"Нет файла {AttributesFileName} с правилами LFS: модели и текстуры придут в игру указателями.");
 
                 return;
             }
@@ -63,36 +87,109 @@ namespace PaperFly.RenderKit.Release
                     LfsFilter,
                     StringComparison.OrdinalIgnoreCase))
             {
-                errors.Add($"{ToUnityPath(attributesPath)}: нет правил LFS ({LfsFilter}).");
+                AddError(
+                    errors,
+                    attributesPath,
+                    PackageRule,
+                    $"Нет правил LFS ({LfsFilter}).");
             }
         }
 
-        private static void CheckPackages(List<string> errors)
+        // В игру попадает только папка пакета. Ссылка на файл из остального проекта художников
+        // в игре окажется пустой: у художника объект выглядит нормально, а в игре, например, станет розовым.
+        private static void CheckExternalReferences(
+            LocationPackage package,
+            List<string> errors)
         {
-            var manifestPaths =
-                Directory.GetFiles(
-                    AssetsPath,
-                    PackageFileName,
-                    SearchOption.AllDirectories);
+            var assetPaths =
+                AssetDatabase
+                    .FindAssets(
+                        string.Empty,
+                        new[] { package.Folder })
+                    .Select(AssetDatabase.GUIDToAssetPath)
+                    .Distinct();
 
-            if (manifestPaths.Length == 0)
+            foreach (var assetPath in assetPaths)
             {
-                errors.Add($"В папке {AssetsPath} нет пакета локации: не найден {PackageFileName}.");
+                var outside =
+                    AssetDatabase
+                        .GetDependencies(
+                            assetPath,
+                            false)
+                        .Where(dependency => dependency.StartsWith(AssetsPath + "/", StringComparison.OrdinalIgnoreCase))
+                        .Where(dependency => !package.Contains(dependency));
+
+                foreach (var dependency in outside)
+                {
+                    AddError(
+                        errors,
+                        assetPath,
+                        ReferenceRule,
+                        $"Ссылка на файл вне пакета: {dependency}. В игре она окажется пустой.");
+                }
+            }
+        }
+
+        private static void CheckManifest(
+            LocationPackage package,
+            List<string> errors)
+        {
+            var saved = ManifestBuilder.Load(package.Folder);
+
+            if (saved == null)
+            {
+                AddError(
+                    errors,
+                    package.Folder,
+                    ManifestRule,
+                    $"Нет манифеста выпуска. {PrepareHint}");
 
                 return;
             }
 
-            foreach (var manifestPath in manifestPaths.Select(ToUnityPath))
-            {
-                CheckManifest(
-                    manifestPath,
-                    errors);
+            var current = package.BuildManifest();
 
-                CheckLfsRules(
-                    ToUnityPath(Path.GetDirectoryName(manifestPath)),
-                    errors);
+            var mismatches =
+                ManifestComparer.FindMismatches(
+                    saved,
+                    current);
+
+            foreach (var mismatch in mismatches)
+            {
+                AddError(
+                    errors,
+                    package.Folder,
+                    ManifestRule,
+                    $"Манифест выпуска устарел. {mismatch} {PrepareHint}");
             }
         }
+
+        // Ошибка попадает и в вывод для push, и в окно отчёта, чтобы художник видел все ошибки в одном месте.
+        private static void AddError(
+            List<string> errors,
+            string assetPath,
+            string rule,
+            string message)
+        {
+            var issue =
+                new ValidationIssue(
+                        ValidationSeverity.Error,
+                        assetPath,
+                        string.Empty,
+                        message)
+                    .WithRule(rule);
+
+            ValidationReport.Add(issue);
+            errors.Add(Describe(issue));
+        }
+
+        private static IEnumerable<string> FilterRuleErrors(
+            IEnumerable<ValidationIssue> issues,
+            IReadOnlyList<LocationPackage> packages)
+            => issues
+                .Where(issue => issue.Severity == ValidationSeverity.Error)
+                .Where(issue => packages.Any(package => package.Contains(issue.AssetPath)))
+                .Select(Describe);
 
         private static string Describe(ValidationIssue issue)
         {
@@ -110,20 +207,77 @@ namespace PaperFly.RenderKit.Release
                 '/');
 
         /// <summary>
-        /// Проверяет устройство пакетов локаций и прогоняет правила импорта по всем их файлам.
+        /// Находит пакеты локаций в Assets и проверяет их устройство.
         /// </summary>
-        /// <returns>Ошибки, из-за которых отправка запрещена; пустой список, если отправлять можно.</returns>
-        public static List<string> Run()
+        /// <param name="errors">Список, в который добавляются ошибки устройства пакетов.</param>
+        /// <returns>Найденные пакеты.</returns>
+        public static List<LocationPackage> FindPackages(List<string> errors)
         {
-            var errors = new List<string>();
+            var manifestPaths =
+                Directory.GetFiles(
+                    AssetsPath,
+                    PackageFileName,
+                    SearchOption.AllDirectories);
 
-            CheckPackages(errors);
+            if (manifestPaths.Length == 0)
+            {
+                AddError(
+                    errors,
+                    AssetsPath,
+                    PackageRule,
+                    $"Нет пакета локации: не найден {PackageFileName}.");
+            }
+
+            var packages = new List<LocationPackage>();
+
+            foreach (var manifestPath in manifestPaths.Select(ToUnityPath))
+            {
+                var package =
+                    ReadPackage(
+                        manifestPath,
+                        errors);
+
+                CheckLfsRules(
+                    package.Folder,
+                    errors);
+
+                packages.Add(package);
+            }
+
+            return packages;
+        }
+
+        /// <summary>
+        /// Проверяет пакеты локаций перед отправкой на сервер.
+        /// </summary>
+        /// <param name="requireManifest"><c>true</c> при выпуске версии: манифест должен быть записан и совпадать с файлами.</param>
+        /// <returns>Ошибки, из-за которых отправка запрещена; пустой список, если отправлять можно.</returns>
+        public static List<string> Run(bool requireManifest)
+        {
+            // Пересканирование очищает окно отчёта, поэтому идёт первым: остальные проверки дописывают в него свои ошибки.
+            var issues = LocationScanner.Rescan();
+
+            var errors = new List<string>();
+            var packages = FindPackages(errors);
 
             errors.AddRange(
-                LocationScanner
-                    .Rescan()
-                    .Where(issue => issue.Severity == ValidationSeverity.Error)
-                    .Select(Describe));
+                FilterRuleErrors(
+                    issues,
+                    packages));
+
+            foreach (var package in packages)
+            {
+                CheckExternalReferences(
+                    package,
+                    errors);
+
+                if (requireManifest)
+                {
+                    CheckManifest(
+                        package,
+                        errors);
+                }
+            }
 
             return errors;
         }

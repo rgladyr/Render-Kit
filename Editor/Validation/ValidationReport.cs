@@ -37,6 +37,28 @@ namespace PaperFly.RenderKit.Validation
         }
 
         /// <summary>
+        /// Добавляет проблему к уже найденным проблемам файла.
+        /// </summary>
+        /// <param name="issue">Найденная проблема.</param>
+        public static void Add(ValidationIssue issue)
+        {
+            lock (SyncRoot)
+            {
+                if (!IssuesByAsset.TryGetValue(
+                        issue.AssetPath,
+                        out var issues))
+                {
+                    issues = new List<ValidationIssue>();
+                    IssuesByAsset[issue.AssetPath] = issues;
+                }
+
+                issues.Add(issue);
+            }
+
+            Changed?.Invoke();
+        }
+
+        /// <summary>
         /// Удаляет проблемы файла.
         /// </summary>
         /// <param name="assetPath">Путь к файлу.</param>

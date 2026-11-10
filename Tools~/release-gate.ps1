@@ -12,8 +12,9 @@
 Unity проверяет проект в том виде, в каком он открыт, поэтому сначала скрипт убеждается, что это и есть
 отправляемая версия: проект стоит на отправляемом коммите, а в папке пакета нет незакоммиченных изменений.
 
-.PARAMETER PushedObjects
-Отправляемые коммиты и теги, которые передаёт хук.
+.PARAMETER PushedRefs
+Отправляемые ссылки в виде «ссылка:объект», которые передаёт хук. Если среди них есть тег,
+проверка идёт в режиме выпуска: манифест выпуска должен быть записан и совпадать с файлами.
 
 .PARAMETER TimeoutSeconds
 Сколько ждать ответа открытой Unity.
@@ -21,7 +22,7 @@ Unity проверяет проект в том виде, в каком он о�
 [CmdletBinding(PositionalBinding = $false)]
 param(
     [Parameter(ValueFromRemainingArguments = $true)]
-    [string[]] $PushedObjects,
+    [string[]] $PushedRefs,
 
     [int] $TimeoutSeconds = 180
 )
@@ -97,11 +98,13 @@ function Wait-OpenEditor([string] $resultPath, [string] $requestId) {
     return $null
 }
 
-function Get-ReleaseErrors([string[]] $pushedObjects) {
+function Get-ReleaseErrors([string[]] $pushedRefs) {
     $errors = @()
     $head = (git rev-parse HEAD).Trim()
 
-    foreach ($pushedObject in $pushedObjects) {
+    foreach ($pushedRef in $pushedRefs) {
+        $pushedObject = ($pushedRef -split ':')[-1]
+
         # Аннотированный тег указывает на объект тега, а не на коммит: разыменовываем.
         $commit = (git rev-parse "$pushedObject^{commit}").Trim()
         $short = $commit.Substring(0, 7)
@@ -154,8 +157,15 @@ Set-Location $project
 
 Write-Host "Проверка локации перед отправкой..."
 
-if ($PushedObjects) {
-    $releaseErrors = @(Get-ReleaseErrors $PushedObjects)
+$mode = 'push'
+
+if ($PushedRefs) {
+    if (@($PushedRefs | Where-Object { $_ -like 'refs/tags/*' }).Count -gt 0) {
+        $mode = 'release'
+        Write-Host "Отправляется тег: проверка в режиме выпуска."
+    }
+
+    $releaseErrors = @(Get-ReleaseErrors $PushedRefs)
 
     if ($releaseErrors.Count -gt 0) {
         Write-Host "Проверка не пройдена, push отменён:"
@@ -172,7 +182,7 @@ $requestId = [guid]::NewGuid().ToString('N')
 
 New-Item -ItemType Directory -Force -Path $folder | Out-Null
 Remove-Item -LiteralPath $resultPath -ErrorAction SilentlyContinue
-[System.IO.File]::WriteAllText($requestPath, $requestId)
+[System.IO.File]::WriteAllText($requestPath, "$requestId`n$mode")
 
 $started = Get-Date
 

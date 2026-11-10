@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -23,6 +24,8 @@ namespace PaperFly.RenderKit.Release
         private const string ResultPath = RootPath + "/result.txt";
 
         private const string LogPrefix = "[Проверка перед отправкой]";
+
+        private const string ReleaseMode = "release";
 
         private const double PollIntervalSeconds = 0.5;
 
@@ -52,10 +55,19 @@ namespace PaperFly.RenderKit.Release
 
         private static bool HandleRequest()
         {
-            var requestId = File.ReadAllText(RequestPath).Trim();
+            // Первая строка запроса — его номер, вторая — release, если отправляется тег версии.
+            var request = File.ReadAllLines(RequestPath);
             File.Delete(RequestPath);
 
-            var errors = ReleaseChecks.Run();
+            var requestId = request[0].Trim();
+            var isRelease =
+                request.Length > 1
+             && string.Equals(
+                    request[1].Trim(),
+                    ReleaseMode,
+                    StringComparison.Ordinal);
+
+            var errors = ReleaseChecks.Run(isRelease);
 
             WriteResult(
                 requestId,
