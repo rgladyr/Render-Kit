@@ -5,7 +5,6 @@ using PaperFly.RenderKit.Release;
 using PaperFly.RenderKit.Validation;
 
 using UnityEditor;
-using UnityEditor.PackageManager;
 
 using UnityEngine;
 
@@ -14,57 +13,15 @@ namespace PaperFly.RenderKit.Acceptance
     /// <summary>
     /// Окно приёма версий локаций в игре: результат проверки, изменения с принятой версии и кнопка «Принять».
     /// </summary>
-    [InitializeOnLoad]
     internal sealed class AcceptanceWindow : EditorWindow
     {
         private const string WindowTitle = "Приём локаций";
-
-        private const string StartupCheckKey = "PaperFly.RenderKit.Acceptance.StartupChecked";
 
         private readonly HashSet<string> expanded = new HashSet<string>();
 
         private List<AcceptanceResult> results = new List<AcceptanceResult>();
 
         private Vector2 scroll;
-
-        static AcceptanceWindow()
-        {
-            if (Application.isBatchMode)
-            {
-                return;
-            }
-
-            Events.registeredPackages += OnPackagesRegistered;
-
-            // Версию могли подтянуть вне Unity (git pull), поэтому при открытии проекта непринятые версии тоже показываются.
-            if (!SessionState.GetBool(
-                    StartupCheckKey,
-                    false))
-            {
-                SessionState.SetBool(
-                    StartupCheckKey,
-                    true);
-
-                EditorApplication.delayCall += OpenIfNotAccepted;
-            }
-        }
-
-        private static void OnPackagesRegistered(PackageRegistrationEventArgs args)
-        {
-            if (args.added.Concat(args.changedTo).Any())
-            {
-                EditorApplication.delayCall -= OpenIfNotAccepted;
-                EditorApplication.delayCall += OpenIfNotAccepted;
-            }
-        }
-
-        private static void OpenIfNotAccepted()
-        {
-            if (InstalledLocation.FindAll().Any(location => !AcceptedManifests.IsAccepted(location)))
-            {
-                Open();
-            }
-        }
 
         private static string GetStatus(AcceptanceResult result)
         {
