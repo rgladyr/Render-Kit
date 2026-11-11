@@ -16,8 +16,6 @@ namespace PaperFly.RenderKit.Validation.Materials
     {
         private const string AssetsFolder = "Assets";
 
-        private const string PackageFileName = "package.json";
-
         private const string ModelsFolder = "Models";
 
         private const string MaterialsFolder = "Materials";
@@ -44,25 +42,9 @@ namespace PaperFly.RenderKit.Validation.Materials
                     separator);
         }
 
-        // Пакет локации — ближайшая папка с package.json. Вне пакета материалы ищутся по всему Assets.
+        // Вне пакета локации материалы ищутся по всему Assets.
         private static string GetPackageFolder(string modelPath)
-        {
-            var folder = GetParent(modelPath);
-
-            while (folder.StartsWith(
-                       AssetsFolder,
-                       StringComparison.OrdinalIgnoreCase))
-            {
-                if (File.Exists($"{folder}/{PackageFileName}"))
-                {
-                    return folder;
-                }
-
-                folder = GetParent(folder);
-            }
-
-            return AssetsFolder;
-        }
+            => LocationAssets.FindPackageFolder(modelPath) ?? AssetsFolder;
 
         // Models/Locations/Childhood.v2.fbx → Materials/Locations/Childhood.v2, как уже разложены материалы пакета.
         private static string GetExtractFolder(string modelPath)

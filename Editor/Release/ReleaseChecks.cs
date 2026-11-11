@@ -213,24 +213,21 @@ namespace PaperFly.RenderKit.Release
         /// <returns>Найденные пакеты.</returns>
         public static List<LocationPackage> FindPackages(List<string> errors)
         {
-            var manifestPaths =
-                Directory.GetFiles(
-                    AssetsPath,
-                    PackageFileName,
-                    SearchOption.AllDirectories);
+            // package.json есть и у сторонних библиотек (Zenject), поэтому берутся только помеченные пакеты локаций.
+            var manifestPaths = LocationAssets.FindSourcePackageFiles();
 
-            if (manifestPaths.Length == 0)
+            if (manifestPaths.Count == 0)
             {
                 AddError(
                     errors,
                     AssetsPath,
                     PackageRule,
-                    $"Нет пакета локации: не найден {PackageFileName}.");
+                    $"Нет пакета локации: не найден {PackageFileName} с ключевым словом «{LocationAssets.Keyword}».");
             }
 
             var packages = new List<LocationPackage>();
 
-            foreach (var manifestPath in manifestPaths.Select(ToUnityPath))
+            foreach (var manifestPath in manifestPaths)
             {
                 var package =
                     ReadPackage(

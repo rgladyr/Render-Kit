@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 
 using PaperFly.RenderKit.Release;
+using PaperFly.RenderKit.Validation;
 
 using UnityEditor.PackageManager;
 
@@ -68,7 +69,8 @@ namespace PaperFly.RenderKit.Acceptance
             && package.source != PackageSource.BuiltIn
             && !string.IsNullOrEmpty(package.resolvedPath)
             && Directory.Exists(package.resolvedPath)
-            && (File.Exists(
+            && ((package.keywords?.Contains(LocationAssets.Keyword) ?? false)
+             || File.Exists(
                     Path.Combine(
                         package.resolvedPath,
                         ReleaseManifest.FileName))
@@ -82,7 +84,7 @@ namespace PaperFly.RenderKit.Acceptance
         /// <summary>
         /// Находит все подключённые пакеты локаций.
         /// </summary>
-        /// <returns>Пакеты с манифестом выпуска или папкой Locations.</returns>
+        /// <returns>Пакеты с ключевым словом локации, манифестом выпуска или папкой Locations.</returns>
         public static List<InstalledLocation> FindAll()
             => PackageInfo
                 .GetAllRegisteredPackages()

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 
+using PaperFly.RenderKit.Acceptance.Conflicts;
 using PaperFly.RenderKit.Release;
 using PaperFly.RenderKit.Validation;
 
@@ -33,7 +34,35 @@ namespace PaperFly.RenderKit.Acceptance
         // Имя и версия из него сверяются отдельно.
         private const string PackageFileName = "package.json";
 
-        private static readonly string[] Rules = { DeliveryRule, RenderKitRule, LostLinkRule };
+        private const string GuidConflictRule = "Конфликт GUID";
+
+        private static readonly string[] Rules = { DeliveryRule, RenderKitRule, LostLinkRule, GuidConflictRule };
+
+        // Пока у файла игры и файла пакета один GUID, Unity видит только один из них, и неизвестно, какой попадёт в сборку.
+        private static void CheckGuidConflicts(
+            AcceptanceResult result,
+            IEnumerable<GuidConflict> conflicts)
+        {
+            var files =
+                conflicts
+                    .Where(conflict => !conflict.IsFolder)
+                    .Where(conflict => string.Equals(
+                        conflict.PackageName,
+                        result.Location.Name,
+                        StringComparison.Ordinal));
+
+            foreach (var conflict in files)
+            {
+                AddIssue(
+                    result,
+                    ValidationSeverity.Error,
+                    conflict.GamePath,
+                    GuidConflictRule,
+                    conflict.IsIdentical
+                        ? $"Копия файла локации {conflict.PackagePath} с тем же GUID, содержимое совпадает. Удалите её из игры: ссылки игры сами перейдут на файл пакета."
+                        : $"Копия файла локации {conflict.PackagePath} с тем же GUID, содержимое отличается. Если в ней игровые правки, перенесите их в локацию (через художника) или вынесите поверх, затем удалите копию из игры.");
+            }
+        }
 
         private static void AddIssue(
             AcceptanceResult result,
@@ -339,8 +368,14 @@ namespace PaperFly.RenderKit.Acceptance
                     ? new List<ReferenceScanner.Reference>()
                     : ReferenceScanner.FindAll(guids);
 
+            var conflicts = GuidConflicts.Find();
+
             foreach (var result in results)
             {
+                CheckGuidConflicts(
+                    result,
+                    conflicts);
+
                 if (result.Location.Manifest == null)
                 {
                     // Разработчик может подключить любой коммит локации, чтобы разобраться в проблеме вместе с художником.

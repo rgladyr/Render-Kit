@@ -1,5 +1,7 @@
 using System.Linq;
 
+using PaperFly.RenderKit.Acceptance.Conflicts;
+
 using UnityEditor;
 using UnityEditor.PackageManager;
 
@@ -52,7 +54,9 @@ namespace PaperFly.RenderKit.Acceptance
 
         private static void OpenIfNotAccepted()
         {
-            if (InstalledLocation.FindAll().Any(location => !AcceptedManifests.IsAccepted(location)))
+            // Копии файлов локации в игре тоже показываются в окне приёма: это ошибка даже у принятой версии.
+            if (InstalledLocation.FindAll().Any(location => !AcceptedManifests.IsAccepted(location))
+             || GuidConflicts.Find().Count > 0)
             {
                 AcceptanceWindow.Open();
             }

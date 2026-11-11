@@ -121,7 +121,12 @@ function Get-ReleaseErrors([string[]] $pushedRefs) {
     }
 
     # Смотрим только папки пакетов: остальной проект в выпуск не входит.
-    $packageFolders = @(git ls-files -- 'Assets/**/package.json' | ForEach-Object { Split-Path $_ -Parent })
+    # package.json есть и у сторонних библиотек (Zenject), поэтому берутся только пакеты локаций:
+    # с ключевым словом paperfly-location или с манифестом выпуска.
+    $packageFolders = @(git ls-files -- 'Assets/**/package.json' | Where-Object {
+        $folder = Split-Path $_ -Parent
+        (Select-String -LiteralPath $_ -Pattern '"paperfly-location"' -SimpleMatch -Quiet) -or (Test-Path (Join-Path $folder 'release-manifest.json'))
+    } | ForEach-Object { Split-Path $_ -Parent })
 
     foreach ($folder in $packageFolders) {
         $changes = @(git status --porcelain --untracked-files=all -- $folder)

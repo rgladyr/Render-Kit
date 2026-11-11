@@ -31,7 +31,7 @@ namespace PaperFly.RenderKit.Validation
             internal const string TexturePreset = "Packages/com.paperfly.renderkit/Presets/LocationTexture.preset";
 
             /// <summary>
-            /// Фрагмент пути, по которому файл считается частью локации.
+            /// Фрагмент пути, по которому файл подключённого пакета считается частью локации (старый признак).
             /// </summary>
             internal const string LocationMarker = "/Locations/";
         }
