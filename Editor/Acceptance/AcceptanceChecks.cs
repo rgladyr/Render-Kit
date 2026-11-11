@@ -113,18 +113,42 @@ namespace PaperFly.RenderKit.Acceptance
 
             var renderKitVersion = PackageInfo.FindForAssembly(typeof(AcceptanceChecks).Assembly)?.version;
 
-            if (!string.Equals(
+            if (string.Equals(
                     manifest.renderKitVersion,
                     renderKitVersion,
                     StringComparison.Ordinal))
             {
-                AddIssue(
-                    result,
-                    ValidationSeverity.Error,
-                    location.AssetFolder,
-                    RenderKitRule,
-                    $"Локация выпущена с Render Kit {manifest.renderKitVersion}, в игре стоит {renderKitVersion}. Версии должны совпадать: обновите Render Kit в игре или у художников.");
+                return;
             }
+
+            // Первые две цифры — рендеринг и импорт: локацию нужно перевыпустить и проверить с новыми настройками.
+            // Последняя — только инструменты: на локацию не влияет.
+            var affectsLocation =
+                !string.Equals(
+                    GetRenderingVersion(manifest.renderKitVersion),
+                    GetRenderingVersion(renderKitVersion),
+                    StringComparison.Ordinal);
+
+            AddIssue(
+                result,
+                affectsLocation
+                    ? ValidationSeverity.Error
+                    : ValidationSeverity.Warning,
+                location.AssetFolder,
+                RenderKitRule,
+                affectsLocation
+                    ? $"Локация выпущена с Render Kit {manifest.renderKitVersion}, в игре стоит {renderKitVersion}: изменились рендеринг или импорт. Художнику нужно обновить Render Kit, проверить локацию и выпустить её заново."
+                    : $"Локация выпущена с Render Kit {manifest.renderKitVersion}, в игре стоит {renderKitVersion}: изменились только инструменты, на локацию это не влияет.");
+        }
+
+        // «0.2.1» → «0.2»: часть версии Render Kit, которая отвечает за рендеринг и импорт.
+        private static string GetRenderingVersion(string version)
+        {
+            var parts = (version ?? string.Empty).Split('.');
+
+            return parts.Length < 2
+                ? version ?? string.Empty
+                : $"{parts[0]}.{parts[1]}";
         }
 
         // Unity при подключении молча пропускает ошибки LFS, поэтому пустые модели и текстуры видны только при сверке файлов.
