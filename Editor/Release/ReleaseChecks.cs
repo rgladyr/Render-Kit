@@ -30,6 +30,10 @@ namespace PaperFly.RenderKit.Release
 
         private const string ManifestRule = "Манифест выпуска";
 
+        private const string RenderKitRule = "Версия Render Kit";
+
+        private const string ManifestFilePath = "Packages/manifest.json";
+
         private const string PrepareHint = "Выполните «" + ReleasePreparation.MenuPath + "» и закоммитьте манифест.";
 
         private static LocationPackage ReadPackage(
@@ -261,6 +265,18 @@ namespace PaperFly.RenderKit.Release
                 FilterRuleErrors(
                     issues,
                     packages));
+
+            // Локация должна выпускаться с теми же настройками рендера, что сейчас в игре, то есть с последним Render Kit.
+            var staleRenderKit = RenderKitFreshness.FindStaleError();
+
+            if (staleRenderKit != null)
+            {
+                AddError(
+                    errors,
+                    ManifestFilePath,
+                    RenderKitRule,
+                    staleRenderKit);
+            }
 
             foreach (var package in packages)
             {
