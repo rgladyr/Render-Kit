@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -18,6 +19,8 @@ namespace PaperFly.RenderKit.Validation
         private const string PresetRuleTitle = "Пресет импорта";
 
         private static readonly ModelValidator Validator = new ModelValidator();
+
+        private static readonly string[] ArtistOwnedProperties = { "m_LODScreenPercentages" };
 
         // Unity создаёт новый обработчик на каждый импортируемый файл, поэтому проблемы предобработки
         // доживают до постобработки того же файла.
@@ -83,12 +86,30 @@ namespace PaperFly.RenderKit.Validation
             var preset = AssetDatabase.LoadAssetAtPath<Preset>(presetPath);
 
             if (preset == null
-             || !preset.ApplyTo(this.assetImporter))
+             || !preset.ApplyTo(
+                    this.assetImporter,
+                    this.GetAppliedProperties(preset)))
             {
                 this.AddPreprocessIssue(
                     ValidationSeverity.Warning,
                     $"Пресет {presetPath} не подходит к этому файлу, настройки импорта не применены.");
             }
+        }
+
+        // Настройки, которые художник подбирает под каждую модель (проценты LOD), берутся из пресета только при первом
+        // импорте файла. Дальше пресет их не трогает, иначе каждый переимпорт стирал бы ручные значения.
+        private string[] GetAppliedProperties(Preset preset)
+        {
+            var isFirstImport = this.assetImporter.importSettingsMissing;
+
+            return preset.PropertyModifications
+                .Select(modification => modification.propertyPath)
+                .Where(path => isFirstImport
+                            || !ArtistOwnedProperties.Any(property => path.StartsWith(
+                                   property,
+                                   StringComparison.Ordinal)))
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
         }
 
         private void AddPreprocessIssue(
