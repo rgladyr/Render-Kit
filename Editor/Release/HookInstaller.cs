@@ -27,6 +27,8 @@ namespace PaperFly.RenderKit.Release
 
         private const string ScriptRelativePath = "Tools~/release-gate.ps1";
 
+        private const string RenderKitSubmodulePath = "Packages/com.paperfly.renderkit";
+
         private const string Notice = "# Файл создаётся Render Kit при открытии проекта, правки будут перезаписаны.\n";
 
         // Хук LFS отправляет модели и текстуры на сервер, поэтому его вызов сохраняется после проверки.
@@ -49,11 +51,31 @@ namespace PaperFly.RenderKit.Release
           + "command -v git-lfs >/dev/null 2>&1 || { printf >&2 \"\\nНе найден git-lfs: модели и текстуры не будут отправлены.\\n\\n\"; exit 2; }\n"
           + "printf '%s\\n' \"$refs\" | git lfs pre-push \"$@\"\n";
 
-        // Версия пакета меняется только через манифест и lock-файл, остальные коммиты проверка не задерживает.
+        // Сабмодуль Render Kit: игра хранит ссылку на его коммит. Если коммит не отправлен на GitHub,
+        // у остальных сабмодуль не скачается, поэтому такую ссылку коммитить нельзя.
+        // Версия пакета локации меняется только через манифест и lock-файл, остальные коммиты проверка не задерживает.
         private const string CommitTemplate =
             "#!/bin/sh\n"
           + CommitMarker + "\n"
           + Notice
+          + "\n"
+          + "renderkit=" + RenderKitSubmodulePath + "\n"
+          + "\n"
+          + "if ! git diff --cached --quiet -- \"$renderkit\"\n"
+          + "then\n"
+          + "  commit=$(git rev-parse \":$renderkit\" 2>/dev/null)\n"
+          + "\n"
+          + "  if [ -n \"$commit\" ] && [ -e \"$renderkit/.git\" ]\n"
+          + "  then\n"
+          + "    git -C \"$renderkit\" fetch -q origin 2>/dev/null\n"
+          + "\n"
+          + "    if [ -z \"$(git -C \"$renderkit\" branch -r --contains \"$commit\" 2>/dev/null)\" ]\n"
+          + "    then\n"
+          + "      printf >&2 \"\\nКоммит Render Kit %s не отправлен на GitHub: у остальных сабмодуль не скачается.\\nСделайте push в сабмодуле Render Kit и повторите коммит.\\n\\n\" \"$commit\"\n"
+          + "      exit 1\n"
+          + "    fi\n"
+          + "  fi\n"
+          + "fi\n"
           + "\n"
           + "changed=$(git diff --cached --name-only -- Packages/manifest.json Packages/packages-lock.json)\n"
           + "\n"

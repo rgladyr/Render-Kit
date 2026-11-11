@@ -1,0 +1,11 @@
+# Файлы Unity в YAML сливаются Smart Merge (UnityYAMLMerge) по смыслу полей, а не построчно.
+# Путь к UnityYAMLMerge.exe у каждого свой, поэтому драйвер прописывает в .git/config сам Render Kit
+# при открытии проекта (Editor/Submodule/RenderKitSubmodule.cs). Без драйвера git сливает как обычный текст.
+*.asset merge=unityyamlmerge
+*.prefab merge=unityyamlmerge
+*.mat merge=unityyamlmerge
+*.unity merge=unityyamlmerge
+*.preset merge=unityyamlmerge
+*.controller merge=unityyamlmerge
+*.anim merge=unityyamlmerge
+*.meta merge=unityyamlmerge
