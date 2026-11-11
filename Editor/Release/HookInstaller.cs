@@ -116,6 +116,13 @@ namespace PaperFly.RenderKit.Release
                     PushTemplate,
                     PushMarker);
             }
+            else
+            {
+                RemoveHook(
+                    hooksFolder,
+                    "pre-push",
+                    PushMarker);
+            }
 
             if (ProjectRole.IsGameProject)
             {
@@ -125,6 +132,48 @@ namespace PaperFly.RenderKit.Release
                     CommitTemplate,
                     CommitMarker);
             }
+            else
+            {
+                RemoveHook(
+                    hooksFolder,
+                    "pre-commit",
+                    CommitMarker);
+            }
+        }
+
+        // Хук мог остаться от прежней роли проекта или прежнего расположения Render Kit и ссылаться на пропавший скрипт.
+        // Свой хук убираем и возвращаем тот, что стоял до Render Kit.
+        private static void RemoveHook(
+            string hooksFolder,
+            string hookName,
+            string marker)
+        {
+            var hookPath =
+                Path.Combine(
+                    hooksFolder,
+                    hookName);
+
+            if (!File.Exists(hookPath)
+             || !File.ReadAllText(hookPath).Contains(marker))
+            {
+                return;
+            }
+
+            var backupPath = hookPath + ".backup";
+
+            if (File.Exists(backupPath))
+            {
+                File.Copy(
+                    backupPath,
+                    hookPath,
+                    true);
+            }
+            else
+            {
+                File.Delete(hookPath);
+            }
+
+            Debug.Log($"Render Kit: хук {hookName} этому проекту не нужен и убран ({hookPath}).");
         }
 
         private static void InstallHook(
