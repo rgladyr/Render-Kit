@@ -58,12 +58,16 @@ namespace PaperFly.RenderKit.Release
         private static string GetRepositoryUrl(PackageInfo package)
             => GetAddress(package).Split('?')[0];
 
+        // Продолжение не возвращается в главный поток Unity: проверка перед отправкой ждёт результат синхронно,
+        // и возврат в заблокированный главный поток повесил бы редактор.
         private static async Task<string> GetRemoteHeadAsync(PackageInfo package)
         {
             var result =
-                await GitRunner.RunAsync(
-                    Environment.CurrentDirectory,
-                    $"ls-remote {GetRepositoryUrl(package)} {Branch}");
+                await GitRunner
+                    .RunAsync(
+                        Environment.CurrentDirectory,
+                        $"ls-remote {GetRepositoryUrl(package)} {Branch}")
+                    .ConfigureAwait(false);
 
             if (!result.IsSuccess
              || result.Output.Length < HashLength)
