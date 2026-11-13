@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -59,6 +60,19 @@ namespace PaperFly.RenderKit.Acceptance
         /// Число предупреждений.
         /// </summary>
         public int WarningCount => this.Issues.Count(issue => issue.Severity == ValidationSeverity.Warning);
+
+        /// <summary>
+        /// Файлы игры, в которых остались правки на удалённые объекты локации.
+        /// </summary>
+        public List<string> LostLinkFiles
+            => this.Issues
+                .Where(issue => string.Equals(
+                    issue.Rule,
+                    AcceptanceChecks.LostLinkRule,
+                    StringComparison.Ordinal))
+                .Select(issue => issue.AssetPath)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
         /// <summary>
         /// Подключён коммит локации, а не выпуск: манифеста нет или он старого формата.

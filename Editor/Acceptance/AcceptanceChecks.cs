@@ -25,7 +25,10 @@ namespace PaperFly.RenderKit.Acceptance
 
         private const string RenderKitRule = "Версия Render Kit";
 
-        private const string LostLinkRule = "Потерянная правка";
+        /// <summary>
+        /// Правило потерянных правок: по нему окно приёма находит файлы для кнопки «Убрать потерянные правки».
+        /// </summary>
+        public const string LostLinkRule = "Потерянная правка";
 
         // Ссылка на префаб или модель целиком (m_SourcePrefab). Такого объекта нет среди содержимого файла, но он есть всегда.
         private const long PrefabAssetFileId = 100100000;
@@ -327,7 +330,7 @@ namespace PaperFly.RenderKit.Acceptance
                     ValidationSeverity.Error,
                     reference.Source,
                     LostLinkRule,
-                    $"Правка указывает на {DescribeLostTarget(result, reference, currentAsset)}, которого нет в версии {manifest.version}. Правка больше не применяется: перенесите её на новый объект или верните объект в основе.");
+                    $"Правка указывает на {DescribeLostTarget(result, reference, currentAsset)}, которого нет в версии {manifest.version}. Перенесите логику на другой объект и нажмите «Убрать потерянные правки» в окне приёма.");
             }
         }
 

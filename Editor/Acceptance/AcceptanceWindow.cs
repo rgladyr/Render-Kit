@@ -163,6 +163,15 @@ namespace PaperFly.RenderKit.Acceptance
                     MessageType.Error);
             }
 
+            var lostFiles = result.LostLinkFiles;
+
+            if (lostFiles.Count > 0
+             && GUILayout.Button($"Убрать потерянные правки ({lostFiles.Count} файл.)"))
+            {
+                // Меняет файлы и может открывать сцены, поэтому выполняется вне отрисовки окна.
+                EditorApplication.delayCall += () => this.CleanLostOverrides(lostFiles);
+            }
+
             using (new EditorGUI.DisabledScope(result.IsAccepted || !result.CanAccept))
             {
                 if (GUILayout.Button("Принять"))
@@ -170,6 +179,45 @@ namespace PaperFly.RenderKit.Acceptance
                     this.Accept(result);
                 }
             }
+        }
+
+        private void CleanLostOverrides(List<string> files)
+        {
+            var confirmed =
+                EditorUtility.DisplayDialog(
+                    "Убрать потерянные правки",
+                    "Из этих файлов будут удалены правки, которые указывают на объекты, удалённые в новой версии локации:\n\n"
+                  + string.Join("\n", files)
+                  + "\n\nПеренесите нужную логику на другие объекты до этого. Изменения можно откатить через git.",
+                    "Убрать",
+                    "Отмена");
+
+            if (!confirmed)
+            {
+                return;
+            }
+
+            var skipped = new List<string>();
+
+            var cleaned =
+                LostOverrideCleaner.Clean(
+                    files,
+                    this.results
+                        .Select(result => result.Location.AssetFolder)
+                        .ToList(),
+                    skipped);
+
+            foreach (var file in cleaned)
+            {
+                Debug.Log($"[Приём локаций] Убраны потерянные правки: {file}");
+            }
+
+            foreach (var reason in skipped)
+            {
+                Debug.LogWarning($"[Приём локаций] Не обработан {reason}");
+            }
+
+            this.Refresh();
         }
 
         /// <summary>
