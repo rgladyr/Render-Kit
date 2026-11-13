@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 
 using PaperFly.RenderKit.Acceptance.Conflicts;
+using PaperFly.RenderKit.Acceptance.Rescue;
 using PaperFly.RenderKit.Release;
 using PaperFly.RenderKit.Validation;
 
@@ -39,7 +40,70 @@ namespace PaperFly.RenderKit.Acceptance
 
         private const string GuidConflictRule = "Конфликт GUID";
 
-        private static readonly string[] Rules = { DeliveryRule, RenderKitRule, LostLinkRule, GuidConflictRule };
+        private const string HolderRule = "Потерянное";
+
+        private const string AssetsFolder = "Assets";
+
+        private static readonly string[] HolderFileExtensions = { ".prefab", ".unity" };
+
+        private static readonly string[] Rules = { DeliveryRule, RenderKitRule, LostLinkRule, GuidConflictRule, HolderRule };
+
+        private static bool CanHoldLost(string path)
+            => HolderFileExtensions.Any(extension => path.EndsWith(
+                extension,
+                StringComparison.OrdinalIgnoreCase));
+
+        // Предупреждение остаётся, пока разработчик не разложит перенесённое из «кармана» и не удалит его.
+        private static void CheckHolders(IReadOnlyCollection<AcceptanceResult> results)
+        {
+            var files =
+                Directory
+                    .GetFiles(
+                        AssetsFolder,
+                        "*",
+                        SearchOption.AllDirectories)
+                    .Where(CanHoldLost);
+
+            foreach (var path in files)
+            {
+                var text = File.ReadAllText(path);
+                var holders = LostOverrideRescue.FindHolders(text);
+
+                if (holders.Count == 0)
+                {
+                    continue;
+                }
+
+                // «Карман» висит на экземпляре локации, поэтому в файле есть GUID одного из её файлов.
+                var result =
+                    results.FirstOrDefault(candidate => GetFiles(candidate.Location.Manifest)
+                        .Where(entry => !string.IsNullOrEmpty(entry.guid))
+                        .Any(entry => text.Contains(
+                            entry.guid,
+                            StringComparison.Ordinal)))
+                 ?? results.FirstOrDefault();
+
+                if (result == null)
+                {
+                    continue;
+                }
+
+                var assetPath =
+                    path.Replace(
+                        '\\',
+                        '/');
+
+                foreach (var holder in holders)
+                {
+                    AddIssue(
+                        result,
+                        ValidationSeverity.Warning,
+                        assetPath,
+                        HolderRule,
+                        $"«{holder}»: сюда перенесено то, что было добавлено на удалённый объект локации. Разложите содержимое по нужным объектам и удалите «{holder}».");
+                }
+            }
+        }
 
         // Пока у файла игры и файла пакета один GUID, Unity видит только один из них, и неизвестно, какой попадёт в сборку.
         private static void CheckGuidConflicts(
@@ -330,7 +394,7 @@ namespace PaperFly.RenderKit.Acceptance
                     ValidationSeverity.Error,
                     reference.Source,
                     LostLinkRule,
-                    $"Правка указывает на {DescribeLostTarget(result, reference, currentAsset)}, которого нет в версии {manifest.version}. Перенесите логику на другой объект и нажмите «Убрать потерянные правки» в окне приёма.");
+                    $"Правка указывает на {DescribeLostTarget(result, reference, currentAsset)}, которого нет в версии {manifest.version}. Нажмите «Убрать потерянные правки» в окне приёма: добавленное на этот объект перейдёт в «{LostOverrideRescue.HolderPrefix} …», остальные правки будут удалены, список сохранится в отчёт.");
             }
         }
 
@@ -426,6 +490,8 @@ namespace PaperFly.RenderKit.Acceptance
 
                 DescribeChanges(result);
             }
+
+            CheckHolders(results);
 
             return results;
         }

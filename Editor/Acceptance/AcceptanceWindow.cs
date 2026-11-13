@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 
+using PaperFly.RenderKit.Acceptance.Rescue;
 using PaperFly.RenderKit.Release;
 using PaperFly.RenderKit.Validation;
 
@@ -16,6 +17,9 @@ namespace PaperFly.RenderKit.Acceptance
     internal sealed class AcceptanceWindow : EditorWindow
     {
         private const string WindowTitle = "Приём локаций";
+
+        // Больше строк окно подтверждения не вмещает.
+        private const int DialogReportLines = 25;
 
         private readonly HashSet<string> expanded = new HashSet<string>();
 
@@ -183,12 +187,32 @@ namespace PaperFly.RenderKit.Acceptance
 
         private void CleanLostOverrides(List<string> files)
         {
+            var targets = new LocationLostTargets(this.results);
+
+            var report =
+                LostOverrideCleaner.Describe(
+                    files,
+                    targets);
+
+            var shown = report.Take(DialogReportLines);
+
+            var more =
+                report.Count > DialogReportLines
+                    ? $"\n… и ещё {report.Count - DialogReportLines} строк: полный список будет в консоли и в файле отчёта."
+                    : string.Empty;
+
+            var message =
+                "Эти правки указывают на объекты, удалённые в новой версии локации:\n\n"
+              + string.Join("\n", shown)
+              + more
+              + "\n\nДобавленные компоненты и дочерние объекты будут перенесены в «"
+              + LostOverrideRescue.HolderPrefix
+              + " …» под корнем экземпляра, остальные правки будут удалены. Изменения можно откатить через git.";
+
             var confirmed =
                 EditorUtility.DisplayDialog(
                     "Убрать потерянные правки",
-                    "Из этих файлов будут удалены правки, которые указывают на объекты, удалённые в новой версии локации:\n\n"
-                  + string.Join("\n", files)
-                  + "\n\nПеренесите нужную логику на другие объекты до этого. Изменения можно откатить через git.",
+                    message,
                     "Убрать",
                     "Отмена");
 
@@ -197,11 +221,16 @@ namespace PaperFly.RenderKit.Acceptance
                 return;
             }
 
+            var reportPath = LostOverrideCleaner.SaveReport(report);
+
+            Debug.Log($"[Приём локаций] Потерянные правки (отчёт сохранён в {reportPath}):\n{string.Join("\n", report)}");
+
             var skipped = new List<string>();
 
             var cleaned =
                 LostOverrideCleaner.Clean(
                     files,
+                    targets,
                     this.results
                         .Select(result => result.Location.AssetFolder)
                         .ToList(),
