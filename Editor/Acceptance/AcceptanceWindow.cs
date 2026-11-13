@@ -246,6 +246,15 @@ namespace PaperFly.RenderKit.Acceptance
                 Debug.LogWarning($"[Приём локаций] Не обработан {reason}");
             }
 
+            // Пропуск легко не заметить в консоли, а правки в этих файлах остались.
+            if (skipped.Count > 0)
+            {
+                EditorUtility.DisplayDialog(
+                    "Не все файлы обработаны",
+                    string.Join("\n\n", skipped),
+                    "Понятно");
+            }
+
             this.Refresh();
         }
 

@@ -114,15 +114,21 @@ namespace PaperFly.RenderKit.Acceptance
         {
             var stage = PrefabStageUtility.GetCurrentPrefabStage();
 
+            // Открытый на редактирование префаб при сохранении из редактора затёр бы перенос, поэтому его нужно закрыть.
             if (stage != null
              && string.Equals(
                     stage.assetPath,
                     path,
                     StringComparison.OrdinalIgnoreCase))
             {
-                skipped.Add($"{path}: префаб открыт на редактирование. Закройте его и нажмите кнопку ещё раз.");
+                if (stage.scene.isDirty)
+                {
+                    skipped.Add($"{path}: префаб открыт на редактирование и в нём есть несохранённые изменения. Сохраните или отмените их и нажмите кнопку ещё раз.");
 
-                return null;
+                    return null;
+                }
+
+                StageUtility.GoToMainStage();
             }
 
             var before = File.ReadAllText(path);
