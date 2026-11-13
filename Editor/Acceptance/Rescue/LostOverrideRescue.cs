@@ -169,6 +169,32 @@ namespace PaperFly.RenderKit.Acceptance.Rescue
             return $"{target}: свойство {property} = {value}{more}{reference}";
         }
 
+        private static string DescribeKind(LostItem item)
+        {
+            switch (item.Kind)
+            {
+                case LostItemKind.Property:
+                    var property =
+                        FindField(
+                            item.Entry,
+                            "propertyPath");
+
+                    return $"свойство {property}";
+
+                case LostItemKind.RemovedComponent:
+                case LostItemKind.RemovedGameObject:
+                    return "удалён в игре";
+
+                case LostItemKind.AddedComponent:
+                    return item.Added == null
+                        ? "добавлен компонент"
+                        : $"добавлен компонент {GetComponentName(item.Added)}";
+
+                default:
+                    return "добавлен дочерний объект";
+            }
+        }
+
         private static void Describe(
             UnityYamlFile file,
             LostItem item,
@@ -183,6 +209,14 @@ namespace PaperFly.RenderKit.Acceptance.Rescue
                 item.HolderName == null
                     ? null
                     : $" → будет перенесён в «{item.HolderName}»";
+
+            // Объект переименован: любая правка переходит на новый объект, остальные варианты не нужны.
+            if (item.RenamedPath != null)
+            {
+                item.Description = $"{target}: {DescribeKind(item)} → объект переименован, правка перейдёт на {item.RenamedPath}";
+
+                return;
+            }
 
             switch (item.Kind)
             {
@@ -300,7 +334,19 @@ namespace PaperFly.RenderKit.Acceptance.Rescue
                         out var added);
 
                     item.Added = file.Find(added.FileId);
+                }
 
+                // Переименованный объект получает правки сам, «карман» ему не нужен.
+                if (targets.TryGetRenamed(
+                        target.Guid,
+                        target.FileId,
+                        out _,
+                        out var renamedPath))
+                {
+                    item.RenamedPath = renamedPath;
+                }
+                else
+                {
                     item.HolderName =
                         GetHolderName(
                             item,
@@ -653,7 +699,8 @@ namespace PaperFly.RenderKit.Acceptance.Rescue
         }
 
         /// <summary>
-        /// Переносит добавленное на удалённые объекты в «карманы» под корнями экземпляров.
+        /// Переносит добавленное на удалённые объекты в «карманы» под корнями экземпляров,
+        /// а все правки переименованных объектов — на их новые объекты.
         /// </summary>
         /// <param name="file">Разобранный файл; меняется на месте.</param>
         /// <param name="items">Потерянные правки этого файла из <see cref="Find"/>.</param>
@@ -679,7 +726,14 @@ namespace PaperFly.RenderKit.Acceptance.Rescue
                     targets);
             }
 
-            return instances.Count > 0;
+            // После «карманов»: перенос в них сверяет элементы списков правок с исходными строками.
+            var retargeted =
+                RenameRetargeter.Apply(
+                    file,
+                    targets);
+
+            return instances.Count > 0
+                || retargeted;
         }
     }
 }

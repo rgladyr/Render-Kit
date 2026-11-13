@@ -83,7 +83,12 @@ namespace PaperFly.RenderKit.Acceptance.Rescue
         public UnityYamlDocument Added { get; set; }
 
         /// <summary>
-        /// Имя «кармана», куда переносится добавленное; <c>null</c>, если перенести нельзя.
+        /// Путь объекта, в который переименован потерянный; <c>null</c>, если объект удалён.
+        /// </summary>
+        public string RenamedPath { get; set; }
+
+        /// <summary>
+        /// Имя «кармана», куда переносится добавленное; <c>null</c>, если перенести нельзя или объект переименован.
         /// </summary>
         public string HolderName { get; set; }
 

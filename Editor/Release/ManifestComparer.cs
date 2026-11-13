@@ -23,6 +23,17 @@ namespace PaperFly.RenderKit.Release
         private static string GetGroupKey(ReleaseManifest.ObjectEntry entry)
             => $"{entry.guid}|{GetParentPath(entry)}";
 
+        private static bool IsInSubtree(
+            string path,
+            string root)
+            => string.Equals(
+                   path,
+                   root,
+                   StringComparison.Ordinal)
+            || path.StartsWith(
+                   root + "/",
+                   StringComparison.Ordinal);
+
         private static List<ReleaseManifest.ObjectEntry> GetGameObjects(ReleaseManifest manifest)
             => manifest.objects
                 .Where(entry => string.Equals(
@@ -94,42 +105,150 @@ namespace PaperFly.RenderKit.Release
             ReleaseManifest previous,
             ReleaseManifest current)
         {
-            var previousObjects = GetGameObjects(previous);
-            var currentObjects = GetGameObjects(current);
+            var renames =
+                FindRenames(
+                    previous,
+                    current);
+
+            var renamedKeys =
+                new HashSet<string>(
+                    renames.Select(rename => GetKey(rename.Old)),
+                    StringComparer.Ordinal);
+
+            var changes =
+                renames
+                    .Select(rename => $"Переименован: {Describe(rename.Old)} → {rename.New.path}")
+                    .ToList();
 
             var removed =
                 Except(
-                    previousObjects,
-                    currentObjects);
+                        GetGameObjects(previous),
+                        GetGameObjects(current))
+                    .Where(entry => !renamedKeys.Contains(GetKey(entry)));
 
-            var added =
-                Except(
-                    currentObjects,
-                    previousObjects);
+            changes.AddRange(removed.Select(entry => $"Удалён: {Describe(entry)}"));
 
-            var changes = new List<string>();
+            return changes;
+        }
+
+        /// <summary>
+        /// Находит объекты, которые, вероятно, переименованы: под одним родителем пропал ровно один объект и появился ровно один.
+        /// </summary>
+        /// <param name="previous">Манифест прошлого выпуска.</param>
+        /// <param name="current">Манифест текущего состояния.</param>
+        /// <returns>Пары «старый объект — новый объект», только GameObject.</returns>
+        public static List<(ReleaseManifest.ObjectEntry Old, ReleaseManifest.ObjectEntry New)> FindRenames(
+            ReleaseManifest previous,
+            ReleaseManifest current)
+        {
+            var previousObjects = GetGameObjects(previous);
+            var currentObjects = GetGameObjects(current);
 
             var addedByGroup =
-                added.ToLookup(
-                    GetGroupKey,
-                    StringComparer.Ordinal);
+                Except(
+                        currentObjects,
+                        previousObjects)
+                    .ToLookup(
+                        GetGroupKey,
+                        StringComparer.Ordinal);
 
-            foreach (var group in removed.GroupBy(GetGroupKey))
+            var removedByGroup =
+                Except(
+                        previousObjects,
+                        currentObjects)
+                    .GroupBy(
+                        GetGroupKey,
+                        StringComparer.Ordinal);
+
+            var renames = new List<(ReleaseManifest.ObjectEntry Old, ReleaseManifest.ObjectEntry New)>();
+
+            foreach (var group in removedByGroup)
             {
                 var addedInGroup = addedByGroup[group.Key].ToList();
 
                 if (group.Count() == 1
                  && addedInGroup.Count == 1)
                 {
-                    changes.Add($"Переименован: {Describe(group.First())} → {addedInGroup[0].path}");
-
-                    continue;
+                    renames.Add((group.First(), addedInGroup[0]));
                 }
-
-                changes.AddRange(group.Select(entry => $"Удалён: {Describe(entry)}"));
             }
 
-            return changes;
+            return renames;
+        }
+
+        /// <summary>
+        /// Сопоставляет каждый пропавший объект переименованного поддерева с новым: сам объект, потомков и компоненты.
+        /// </summary>
+        /// <param name="previous">Манифест прошлого выпуска.</param>
+        /// <param name="current">Манифест текущего состояния.</param>
+        /// <returns>Ключ старого объекта → новый объект.</returns>
+        /// <remarks>
+        /// При переименовании в Blender новый идентификатор получают и потомки, потому что он строится из пути.
+        /// Объект ищется по тому же пути с новым именем и тому же типу; одинаковые компоненты одного объекта — по порядку.
+        /// </remarks>
+        public static Dictionary<string, ReleaseManifest.ObjectEntry> FindRenamedObjects(
+            ReleaseManifest previous,
+            ReleaseManifest current)
+        {
+            var map = new Dictionary<string, ReleaseManifest.ObjectEntry>(StringComparer.Ordinal);
+
+            var currentKeys =
+                new HashSet<string>(
+                    current.objects.Select(GetKey),
+                    StringComparer.Ordinal);
+
+            var renames =
+                FindRenames(
+                    previous,
+                    current);
+
+            foreach (var (oldRoot, newRoot) in renames)
+            {
+                var candidates =
+                    current.objects
+                        .Where(entry => string.Equals(
+                            entry.guid,
+                            newRoot.guid,
+                            StringComparison.Ordinal))
+                        .ToLookup(
+                            entry => $"{entry.path}|{entry.type}",
+                            StringComparer.Ordinal);
+
+                var lostEntries =
+                    previous.objects
+                        .Where(entry => string.Equals(
+                            entry.guid,
+                            oldRoot.guid,
+                            StringComparison.Ordinal))
+                        .Where(entry => IsInSubtree(
+                            entry.path,
+                            oldRoot.path))
+                        .Where(entry => !currentKeys.Contains(GetKey(entry)))
+                        .GroupBy(
+                            entry => $"{entry.path}|{entry.type}",
+                            StringComparer.Ordinal);
+
+                foreach (var group in lostEntries)
+                {
+                    var first = group.First();
+
+                    var newPath =
+                        newRoot.path
+                      + first.path.Substring(oldRoot.path.Length);
+
+                    var matches = candidates[$"{newPath}|{first.type}"].ToList();
+
+                    foreach (var (entry, index) in group.Select((entry, index) => (entry, index)))
+                    {
+                        if (index < matches.Count)
+                        {
+                            map[GetKey(entry)] = matches[index];
+                        }
+                    }
+                }
+            }
+
+            return map;
         }
 
         /// <summary>

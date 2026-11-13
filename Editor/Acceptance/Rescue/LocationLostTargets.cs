@@ -26,6 +26,9 @@ namespace PaperFly.RenderKit.Acceptance.Rescue
 
         private readonly Dictionary<string, long> rootTransforms = new Dictionary<string, long>(StringComparer.Ordinal);
 
+        private readonly Dictionary<string, ReleaseManifest.ObjectEntry> renamedObjects =
+            new Dictionary<string, ReleaseManifest.ObjectEntry>(StringComparer.Ordinal);
+
         /// <summary>
         /// Собирает сведения по результатам проверки приёма.
         /// </summary>
@@ -65,6 +68,22 @@ namespace PaperFly.RenderKit.Acceptance.Rescue
             foreach (var entry in result.Accepted?.objects ?? Enumerable.Empty<ReleaseManifest.ObjectEntry>())
             {
                 this.previousObjects[ManifestComparer.GetKey(entry)] = entry;
+            }
+
+            // Без описаний объектов в принятой версии переименование не распознать.
+            if (result.Accepted?.format != ReleaseManifest.CurrentFormat)
+            {
+                return;
+            }
+
+            var renamed =
+                ManifestComparer.FindRenamedObjects(
+                    result.Accepted,
+                    manifest);
+
+            foreach (var pair in renamed)
+            {
+                this.renamedObjects[pair.Key] = pair.Value;
             }
         }
 
@@ -122,6 +141,33 @@ namespace PaperFly.RenderKit.Acceptance.Rescue
             return entry == null
                 ? fileId.ToString(CultureInfo.InvariantCulture)
                 : entry.path.Split('/').Last();
+        }
+
+        /// <inheritdoc/>
+        public bool TryGetRenamed(
+            string guid,
+            long fileId,
+            out long renamedFileId,
+            out string renamedPath)
+        {
+            var found =
+                this.renamedObjects.TryGetValue(
+                    ManifestComparer.GetKey(
+                        guid,
+                        fileId),
+                    out var entry);
+
+            renamedFileId =
+                found
+                    ? entry.fileId
+                    : 0;
+
+            renamedPath =
+                found
+                    ? entry.path
+                    : null;
+
+            return found;
         }
 
         /// <inheritdoc/>

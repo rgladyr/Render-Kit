@@ -36,6 +36,20 @@ namespace PaperFly.RenderKit.Acceptance.Rescue
             long fileId);
 
         /// <summary>
+        /// Находит объект, в который, вероятно, переименован потерянный.
+        /// </summary>
+        /// <param name="guid">GUID файла основы.</param>
+        /// <param name="fileId">Идентификатор потерянного объекта.</param>
+        /// <param name="renamedFileId">Идентификатор нового объекта в том же файле.</param>
+        /// <param name="renamedPath">Путь нового объекта в иерархии.</param>
+        /// <returns><c>false</c>, если объект удалён, а не переименован.</returns>
+        bool TryGetRenamed(
+            string guid,
+            long fileId,
+            out long renamedFileId,
+            out string renamedPath);
+
+        /// <summary>
         /// Корневой Transform основы, к которому вешается «карман».
         /// </summary>
         /// <param name="guid">GUID файла основы.</param>

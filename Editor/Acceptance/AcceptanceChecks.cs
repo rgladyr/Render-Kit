@@ -359,6 +359,8 @@ namespace PaperFly.RenderKit.Acceptance
                     manifest.objects.Select(entry => entry.guid),
                     StringComparer.Ordinal);
 
+            var targets = new LocationLostTargets(new[] { result });
+
             foreach (var reference in references)
             {
                 if (!currentFiles.TryGetValue(
@@ -389,12 +391,27 @@ namespace PaperFly.RenderKit.Acceptance
                     continue;
                 }
 
+                var lostTarget =
+                    DescribeLostTarget(
+                        result,
+                        reference,
+                        currentAsset);
+
+                var message =
+                    targets.TryGetRenamed(
+                        reference.Guid,
+                        reference.FileId,
+                        out _,
+                        out var renamedPath)
+                        ? $"Правка указывает на {lostTarget}: в версии {manifest.version} объект, вероятно, переименован в {renamedPath}. Нажмите «Убрать потерянные правки» в окне приёма: правка перейдёт на новый объект."
+                        : $"Правка указывает на {lostTarget}, которого нет в версии {manifest.version}. Нажмите «Убрать потерянные правки» в окне приёма: добавленное на этот объект перейдёт в «{LostOverrideRescue.HolderPrefix} …», остальные правки будут удалены, список сохранится в отчёт.";
+
                 AddIssue(
                     result,
                     ValidationSeverity.Error,
                     reference.Source,
                     LostLinkRule,
-                    $"Правка указывает на {DescribeLostTarget(result, reference, currentAsset)}, которого нет в версии {manifest.version}. Нажмите «Убрать потерянные правки» в окне приёма: добавленное на этот объект перейдёт в «{LostOverrideRescue.HolderPrefix} …», остальные правки будут удалены, список сохранится в отчёт.");
+                    message);
             }
         }
 
