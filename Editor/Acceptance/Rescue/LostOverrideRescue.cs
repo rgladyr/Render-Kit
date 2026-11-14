@@ -9,7 +9,7 @@ using UnityEditor;
 namespace PaperFly.RenderKit.Acceptance.Rescue
 {
     /// <summary>
-    /// Находит в файле игры правки на удалённые объекты основы и переносит добавленное на них в «карман».
+    /// Находит в файле игры правки на удалённые объекты основы и переносит добавленное на них в объект «_Потерянное …».
     /// </summary>
     /// <remarks>
     /// Добавленный компонент на удалённом объекте Unity теряет уже при загрузке файла, а очистка неиспользуемых правок
@@ -20,7 +20,7 @@ namespace PaperFly.RenderKit.Acceptance.Rescue
     internal static class LostOverrideRescue
     {
         /// <summary>
-        /// Начало имени «кармана»: по нему проверка приёма напоминает разобрать перенесённое.
+        /// Начало имени объекта «_Потерянное …»: по нему проверка приёма находит неразобранное.
         /// </summary>
         public const string HolderPrefix = "_Потерянное";
 
@@ -54,7 +54,12 @@ namespace PaperFly.RenderKit.Acceptance.Rescue
                 @"^  m_Name: (?<name>.*?)\r?$",
                 RegexOptions.Compiled | RegexOptions.Multiline);
 
-        private static string ReadName(string value)
+        /// <summary>
+        /// Читает имя объекта из значения m_Name.
+        /// </summary>
+        /// <param name="value">Значение поля, возможно в кавычках с \uXXXX.</param>
+        /// <returns>Имя без кавычек и экранирования.</returns>
+        public static string ReadName(string value)
             => value.Length > 1
             && value[0] == Quote
             && value[value.Length - 1] == Quote
@@ -64,10 +69,10 @@ namespace PaperFly.RenderKit.Acceptance.Rescue
                 : value;
 
         /// <summary>
-        /// Находит в тексте сцены или префаба «карманы», созданные при переносе.
+        /// Находит в тексте сцены или префаба объекты «_Потерянное …», созданные при переносе.
         /// </summary>
         /// <param name="text">Содержимое файла.</param>
-        /// <returns>Имена «карманов».</returns>
+        /// <returns>Имена объектов.</returns>
         public static List<string> FindHolders(string text)
             => NamePattern
                 .Matches(text)
@@ -96,7 +101,12 @@ namespace PaperFly.RenderKit.Acceptance.Rescue
             return line?.Substring(prefix.Length).Trim();
         }
 
-        private static string GetComponentName(UnityYamlDocument component)
+        /// <summary>
+        /// Имя компонента для отчёта: имя скрипта или тип.
+        /// </summary>
+        /// <param name="component">Документ компонента.</param>
+        /// <returns>Например «TestLogic» или «BoxCollider».</returns>
+        public static string GetComponentName(UnityYamlDocument component)
         {
             if (!string.Equals(
                     component.TypeName,
@@ -200,23 +210,21 @@ namespace PaperFly.RenderKit.Acceptance.Rescue
             LostItem item,
             ILostTargets targets)
         {
+            var renamed =
+                item.RenamedPath == null
+                    ? string.Empty
+                    : $" (вероятно, переименован в {item.RenamedPath})";
+
             var target =
                 targets.Describe(
                     item.Target.Guid,
-                    item.Target.FileId);
+                    item.Target.FileId)
+              + renamed;
 
             var destination =
                 item.HolderName == null
                     ? null
                     : $" → будет перенесён в «{item.HolderName}»";
-
-            // Объект переименован: любая правка переходит на новый объект, остальные варианты не нужны.
-            if (item.RenamedPath != null)
-            {
-                item.Description = $"{target}: {DescribeKind(item)} → объект переименован, правка перейдёт на {item.RenamedPath}";
-
-                return;
-            }
 
             switch (item.Kind)
             {
@@ -336,23 +344,21 @@ namespace PaperFly.RenderKit.Acceptance.Rescue
                     item.Added = file.Find(added.FileId);
                 }
 
-                // Переименованный объект получает правки сам, «карман» ему не нужен.
+                // Переименование обрабатывается как удаление: автоматический перенос правок на другой объект
+                // мог бы ошибиться, а «_Потерянное» разработчик разбирает сам. Новое имя — только подсказка.
                 if (targets.TryGetRenamed(
                         target.Guid,
                         target.FileId,
-                        out _,
                         out var renamedPath))
                 {
                     item.RenamedPath = renamedPath;
                 }
-                else
-                {
-                    item.HolderName =
-                        GetHolderName(
-                            item,
-                            source.Guid,
-                            targets);
-                }
+
+                item.HolderName =
+                    GetHolderName(
+                        item,
+                        source.Guid,
+                        targets);
 
                 Describe(
                     file,
@@ -699,8 +705,7 @@ namespace PaperFly.RenderKit.Acceptance.Rescue
         }
 
         /// <summary>
-        /// Переносит добавленное на удалённые объекты в «карманы» под корнями экземпляров,
-        /// а все правки переименованных объектов — на их новые объекты.
+        /// Переносит добавленное на удалённые и переименованные объекты в объекты «_Потерянное …» под корнями экземпляров.
         /// </summary>
         /// <param name="file">Разобранный файл; меняется на месте.</param>
         /// <param name="items">Потерянные правки этого файла из <see cref="Find"/>.</param>
@@ -726,14 +731,7 @@ namespace PaperFly.RenderKit.Acceptance.Rescue
                     targets);
             }
 
-            // После «карманов»: перенос в них сверяет элементы списков правок с исходными строками.
-            var retargeted =
-                RenameRetargeter.Apply(
-                    file,
-                    targets);
-
-            return instances.Count > 0
-                || retargeted;
+            return instances.Count > 0;
         }
     }
 }

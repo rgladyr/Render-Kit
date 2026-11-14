@@ -147,7 +147,6 @@ namespace PaperFly.RenderKit.Acceptance.Rescue
         public bool TryGetRenamed(
             string guid,
             long fileId,
-            out long renamedFileId,
             out string renamedPath)
         {
             var found =
@@ -156,11 +155,6 @@ namespace PaperFly.RenderKit.Acceptance.Rescue
                         guid,
                         fileId),
                     out var entry);
-
-            renamedFileId =
-                found
-                    ? entry.fileId
-                    : 0;
 
             renamedPath =
                 found

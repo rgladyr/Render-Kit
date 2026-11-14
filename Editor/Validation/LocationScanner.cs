@@ -48,6 +48,35 @@ namespace PaperFly.RenderKit.Validation
             return ValidationReport.GetAll();
         }
 
+        /// <summary>
+        /// Заново проверяет только указанные модели и текстуры: быстрая проверка при коммите.
+        /// </summary>
+        /// <param name="paths">Пути файлов в проекте; остальные файлы пропускаются.</param>
+        /// <returns>Проблемы указанных файлов.</returns>
+        public static List<ValidationIssue> Rescan(IReadOnlyCollection<string> paths)
+        {
+            foreach (var path in paths)
+            {
+                var importer = AssetImporter.GetAtPath(path);
+
+                if (importer is ModelImporter)
+                {
+                    ValidateModel(path);
+                }
+                else if (importer is TextureImporter)
+                {
+                    ValidationReport.Set(
+                        path,
+                        ModelValidator.ValidateTexture(path));
+                }
+            }
+
+            return ValidationReport
+                .GetAll()
+                .Where(issue => paths.Contains(issue.AssetPath))
+                .ToList();
+        }
+
         private static string[] FindLocationAssets(string filter)
             => AssetDatabase
                 .FindAssets(filter)

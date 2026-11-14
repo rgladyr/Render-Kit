@@ -13,7 +13,8 @@ namespace PaperFly.RenderKit.Release
     /// Ставит git-хуки проверки при каждом открытии проекта. Какой хук нужен, определяется по тому, где лежит пакет локации.
     /// </summary>
     /// <remarks>
-    /// <para>Пакет лежит в Assets исходниками — это проект художников: хук pre-push запускает проверку перед отправкой.</para>
+    /// <para>Пакет лежит в Assets исходниками — это проект художников: хук pre-commit быстро проверяет файлы коммита,
+    /// хук pre-push запускает полную проверку перед отправкой.</para>
     /// <para>Пакет подключён через Packages/manifest.json и в нём есть манифест выпуска — это проект игры:
     /// хук pre-commit запускает проверку приёма, когда в коммит попадает новая версия пакета.</para>
     /// <para>Git не хранит хуки в репозитории, поэтому без установщика каждому пришлось бы ставить их вручную.</para>
@@ -24,6 +25,11 @@ namespace PaperFly.RenderKit.Release
         private const string PushMarker = "# PaperFly Render Kit: проверка перед отправкой";
 
         private const string CommitMarker = "# PaperFly Render Kit: проверка приёма локаций";
+
+        private const string LocationCommitMarker = "# PaperFly Render Kit: быстрая проверка коммита";
+
+        // Общее начало всех маркеров: хук другой роли — тоже наш, его не нужно сохранять как чужой.
+        private const string AnyMarker = "# PaperFly Render Kit:";
 
         private const string ScriptRelativePath = "Tools~/release-gate.ps1";
 
@@ -84,6 +90,14 @@ namespace PaperFly.RenderKit.Release
           + "  powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"{SCRIPT}\" -Mode accept || exit 1\n"
           + "fi\n";
 
+        // У художника: ошибки импорта видны уже при коммите. Полная проверка остаётся перед отправкой.
+        private const string LocationCommitTemplate =
+            "#!/bin/sh\n"
+          + LocationCommitMarker + "\n"
+          + Notice
+          + "\n"
+          + "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"{SCRIPT}\" -Mode commit || exit 1\n";
+
         static HookInstaller()
         {
             if (Application.isBatchMode)
@@ -113,8 +127,7 @@ namespace PaperFly.RenderKit.Release
                 InstallHook(
                     hooksFolder,
                     "pre-push",
-                    PushTemplate,
-                    PushMarker);
+                    PushTemplate);
             }
             else
             {
@@ -124,20 +137,26 @@ namespace PaperFly.RenderKit.Release
                     PushMarker);
             }
 
-            if (ProjectRole.IsGameProject)
+            if (ProjectRole.IsLocationProject)
             {
                 InstallHook(
                     hooksFolder,
                     "pre-commit",
-                    CommitTemplate,
-                    CommitMarker);
+                    LocationCommitTemplate);
+            }
+            else if (ProjectRole.IsGameProject)
+            {
+                InstallHook(
+                    hooksFolder,
+                    "pre-commit",
+                    CommitTemplate);
             }
             else
             {
                 RemoveHook(
                     hooksFolder,
                     "pre-commit",
-                    CommitMarker);
+                    AnyMarker);
             }
         }
 
@@ -179,8 +198,7 @@ namespace PaperFly.RenderKit.Release
         private static void InstallHook(
             string hooksFolder,
             string hookName,
-            string template,
-            string marker)
+            string template)
         {
             var hookPath =
                 Path.Combine(
@@ -201,9 +219,7 @@ namespace PaperFly.RenderKit.Release
                 return;
             }
 
-            KeepForeignHook(
-                hookPath,
-                marker);
+            KeepForeignHook(hookPath);
 
             File.WriteAllText(
                 hookPath,
@@ -212,12 +228,10 @@ namespace PaperFly.RenderKit.Release
             Debug.Log($"Render Kit: установлен хук {hookName} ({hookPath}).");
         }
 
-        private static void KeepForeignHook(
-            string hookPath,
-            string marker)
+        private static void KeepForeignHook(string hookPath)
         {
             if (!File.Exists(hookPath)
-             || File.ReadAllText(hookPath).Contains(marker))
+             || File.ReadAllText(hookPath).Contains(AnyMarker))
             {
                 return;
             }

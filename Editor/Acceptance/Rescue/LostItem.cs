@@ -88,7 +88,7 @@ namespace PaperFly.RenderKit.Acceptance.Rescue
         public string RenamedPath { get; set; }
 
         /// <summary>
-        /// Имя «кармана», куда переносится добавленное; <c>null</c>, если перенести нельзя или объект переименован.
+        /// Имя объекта «_Потерянное …», куда переносится добавленное; <c>null</c>, если перенести нельзя.
         /// </summary>
         public string HolderName { get; set; }
 

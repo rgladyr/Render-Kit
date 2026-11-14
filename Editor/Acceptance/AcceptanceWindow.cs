@@ -170,10 +170,18 @@ namespace PaperFly.RenderKit.Acceptance
             var lostFiles = result.LostLinkFiles;
 
             if (lostFiles.Count > 0
-             && GUILayout.Button($"Убрать потерянные правки ({lostFiles.Count} файл.)"))
+             && GUILayout.Button($"Сохранить потерянные правки ({lostFiles.Count} файл.)"))
             {
                 // Меняет файлы и может открывать сцены, поэтому выполняется вне отрисовки окна.
                 EditorApplication.delayCall += () => this.CleanLostOverrides(lostFiles);
+            }
+
+            var holderFiles = result.HolderFiles;
+
+            if (holderFiles.Count > 0
+             && GUILayout.Button($"Удалить «{LostOverrideRescue.HolderPrefix} …» ({holderFiles.Count} файл.)"))
+            {
+                EditorApplication.delayCall += () => this.RemoveHolders(holderFiles);
             }
 
             using (new EditorGUI.DisabledScope(result.IsAccepted || !result.CanAccept))
@@ -202,18 +210,18 @@ namespace PaperFly.RenderKit.Acceptance
                     : string.Empty;
 
             var message =
-                "Эти правки указывают на объекты, удалённые в новой версии локации:\n\n"
+                "Эти правки и ссылки указывают на объекты, которых нет в новой версии локации (удалены или переименованы):\n\n"
               + string.Join("\n", shown)
               + more
               + "\n\nДобавленные компоненты и дочерние объекты будут перенесены в «"
               + LostOverrideRescue.HolderPrefix
-              + " …» под корнем экземпляра, остальные правки будут удалены. Изменения можно откатить через git.";
+              + " …» под корнем локации. Изменённые поля и ссылки на удалённые объекты сохранятся только в отчёте: перенесите их вручную. Изменения можно откатить через git.";
 
             var confirmed =
                 EditorUtility.DisplayDialog(
-                    "Убрать потерянные правки",
+                    "Сохранить потерянные правки",
                     message,
-                    "Убрать",
+                    "Сохранить",
                     "Отмена");
 
             if (!confirmed)
@@ -238,15 +246,20 @@ namespace PaperFly.RenderKit.Acceptance
 
             foreach (var file in cleaned)
             {
-                Debug.Log($"[Приём локаций] Убраны потерянные правки: {file}");
+                Debug.Log($"[Приём локаций] Потерянные правки сохранены: {file}");
             }
 
+            this.ReportSkipped(skipped);
+        }
+
+        // Пропуск легко не заметить в консоли, а правки в этих файлах остались.
+        private void ReportSkipped(IReadOnlyCollection<string> skipped)
+        {
             foreach (var reason in skipped)
             {
                 Debug.LogWarning($"[Приём локаций] Не обработан {reason}");
             }
 
-            // Пропуск легко не заметить в консоли, а правки в этих файлах остались.
             if (skipped.Count > 0)
             {
                 EditorUtility.DisplayDialog(
@@ -256,6 +269,42 @@ namespace PaperFly.RenderKit.Acceptance
             }
 
             this.Refresh();
+        }
+
+        private void RemoveHolders(List<string> files)
+        {
+            var message =
+                "Объекты «"
+              + LostOverrideRescue.HolderPrefix
+              + " …» будут удалены вместе со всем, что в них перенесено:\n\n"
+              + string.Join("\n", files)
+              + "\n\nУдаляйте, только если перенесённое больше не нужно. Изменения можно откатить через git.";
+
+            var confirmed =
+                EditorUtility.DisplayDialog(
+                    "Удалить «" + LostOverrideRescue.HolderPrefix + " …»",
+                    message,
+                    "Удалить",
+                    "Отмена");
+
+            if (!confirmed)
+            {
+                return;
+            }
+
+            var skipped = new List<string>();
+
+            var changed =
+                LostOverrideCleaner.RemoveHolders(
+                    files,
+                    skipped);
+
+            foreach (var file in changed)
+            {
+                Debug.Log($"[Приём локаций] Удалены объекты «{LostOverrideRescue.HolderPrefix} …»: {file}");
+            }
+
+            this.ReportSkipped(skipped);
         }
 
         /// <summary>

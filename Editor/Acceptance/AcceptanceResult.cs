@@ -62,17 +62,17 @@ namespace PaperFly.RenderKit.Acceptance
         public int WarningCount => this.Issues.Count(issue => issue.Severity == ValidationSeverity.Warning);
 
         /// <summary>
-        /// Файлы игры, в которых остались правки на удалённые объекты локации.
+        /// Файлы игры, в которых остались правки и ссылки на удалённые объекты локации.
         /// </summary>
         public List<string> LostLinkFiles
-            => this.Issues
-                .Where(issue => string.Equals(
-                    issue.Rule,
-                    AcceptanceChecks.LostLinkRule,
-                    StringComparison.Ordinal))
-                .Select(issue => issue.AssetPath)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            => this.GetFiles(
+                AcceptanceChecks.LostLinkRule,
+                AcceptanceChecks.LostReferenceRule);
+
+        /// <summary>
+        /// Файлы игры, в которых остались объекты «_Потерянное …».
+        /// </summary>
+        public List<string> HolderFiles => this.GetFiles(AcceptanceChecks.HolderRule);
 
         /// <summary>
         /// Подключён коммит локации, а не выпуск: манифеста нет или он старого формата.
@@ -87,5 +87,14 @@ namespace PaperFly.RenderKit.Acceptance
         public bool CanAccept
             => !this.IsTrial
             && this.ErrorCount == 0;
+
+        private List<string> GetFiles(params string[] rules)
+            => this.Issues
+                .Where(issue => rules.Contains(
+                    issue.Rule,
+                    StringComparer.Ordinal))
+                .Select(issue => issue.AssetPath)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
     }
 }

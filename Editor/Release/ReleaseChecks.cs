@@ -20,6 +20,8 @@ namespace PaperFly.RenderKit.Release
 
         private const string PackageFileName = "package.json";
 
+        private const string MetaExtension = ".meta";
+
         private const string AttributesFileName = ".gitattributes";
 
         private const string LfsFilter = "filter=lfs";
@@ -42,7 +44,7 @@ namespace PaperFly.RenderKit.Release
         {
             var manifest = JsonUtility.FromJson<PackageManifest>(File.ReadAllText(manifestPath));
 
-            if (string.IsNullOrWhiteSpace(manifest.name))
+            if (string.IsNullOrWhiteSpace(manifest.Name))
             {
                 AddError(
                     errors,
@@ -51,7 +53,7 @@ namespace PaperFly.RenderKit.Release
                     "Не указано имя пакета (name).");
             }
 
-            if (string.IsNullOrWhiteSpace(manifest.version))
+            if (string.IsNullOrWhiteSpace(manifest.Version))
             {
                 AddError(
                     errors,
@@ -62,8 +64,8 @@ namespace PaperFly.RenderKit.Release
 
             return new LocationPackage(
                 ToUnityPath(Path.GetDirectoryName(manifestPath)),
-                manifest.name,
-                manifest.version);
+                manifest.Name,
+                manifest.Version);
         }
 
         // Unity при подключении пакета выкладывает только его папку, без корня репозитория.
@@ -115,22 +117,33 @@ namespace PaperFly.RenderKit.Release
 
             foreach (var assetPath in assetPaths)
             {
-                var outside =
-                    AssetDatabase
-                        .GetDependencies(
-                            assetPath,
-                            false)
-                        .Where(dependency => dependency.StartsWith(AssetsPath + "/", StringComparison.OrdinalIgnoreCase))
-                        .Where(dependency => !package.Contains(dependency));
+                CheckExternalReferences(
+                    package,
+                    assetPath,
+                    errors);
+            }
+        }
 
-                foreach (var dependency in outside)
-                {
-                    AddError(
-                        errors,
+        private static void CheckExternalReferences(
+            LocationPackage package,
+            string assetPath,
+            List<string> errors)
+        {
+            var outside =
+                AssetDatabase
+                    .GetDependencies(
                         assetPath,
-                        ReferenceRule,
-                        $"Ссылка на файл вне пакета: {dependency}. В игре она окажется пустой.");
-                }
+                        false)
+                    .Where(dependency => dependency.StartsWith(AssetsPath + "/", StringComparison.OrdinalIgnoreCase))
+                    .Where(dependency => !package.Contains(dependency));
+
+            foreach (var dependency in outside)
+            {
+                AddError(
+                    errors,
+                    assetPath,
+                    ReferenceRule,
+                    $"Ссылка на файл вне папки {package.Folder}: {dependency}. В игру попадает только эта папка, и в игре ссылка окажется пустой. Перенесите файл в {package.Folder}.");
             }
         }
 
@@ -296,14 +309,69 @@ namespace PaperFly.RenderKit.Release
         }
 
         /// <summary>
+        /// Быстрая проверка при коммите: только правила импорта и ссылки вне пакета у файлов, которые попадают в коммит.
+        /// </summary>
+        /// <param name="files">Пути файлов коммита относительно корня проекта.</param>
+        /// <returns>Ошибки, из-за которых коммит запрещён; пустой список, если коммитить можно.</returns>
+        /// <remarks>
+        /// Полная проверка остаётся при отправке: только там видно, что уходит на сервер целиком.
+        /// </remarks>
+        public static List<string> RunForCommit(IEnumerable<string> files)
+        {
+            var assetPaths =
+                files
+                    .Select(ToUnityPath)
+                    .Select(path => path.EndsWith(
+                        MetaExtension,
+                        StringComparison.OrdinalIgnoreCase)
+                        ? path.Substring(
+                            0,
+                            path.Length - MetaExtension.Length)
+                        : path)
+                    .Where(LocationAssets.IsLocationAsset)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+            var errors = new List<string>();
+
+            if (assetPaths.Count == 0)
+            {
+                return errors;
+            }
+
+            var issues = LocationScanner.Rescan(assetPaths);
+            var packages = FindPackages(errors);
+
+            errors.AddRange(
+                FilterRuleErrors(
+                    issues,
+                    packages));
+
+            foreach (var assetPath in assetPaths)
+            {
+                var package = packages.FirstOrDefault(candidate => candidate.Contains(assetPath));
+
+                if (package != null)
+                {
+                    CheckExternalReferences(
+                        package,
+                        assetPath,
+                        errors);
+                }
+            }
+
+            return errors;
+        }
+
+        /// <summary>
         /// Поля package.json, которые нужны проверке. Имена совпадают с ключами JSON, как требует JsonUtility.
         /// </summary>
         [Serializable]
         private sealed class PackageManifest
         {
-            public string name;
+            public string Name;
 
-            public string version;
+            public string Version;
         }
     }
 }

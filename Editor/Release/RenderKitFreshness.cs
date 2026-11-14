@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Threading.Tasks;
 
 using PaperFly.RenderKit.Versions;
@@ -29,6 +30,9 @@ namespace PaperFly.RenderKit.Release
 
         private const int HashLength = 40;
 
+        // Версия, с которой проект открывали в прошлый раз: по ней видно, что обновление поменяло рендеринг.
+        private const string SeenVersionPath = "Library/PaperFly/RenderKitVersion.txt";
+
         static RenderKitFreshness()
         {
             if (Application.isBatchMode)
@@ -37,6 +41,55 @@ namespace PaperFly.RenderKit.Release
             }
 
             EditorApplication.delayCall += UpdateIfStale;
+            EditorApplication.delayCall += ReportRenderingChange;
+        }
+
+        // После обновления Render Kit художник должен узнать, что картинка локации могла измениться и её нужно перевыпустить.
+        private static void ReportRenderingChange()
+        {
+            if (!ProjectRole.IsLocationProject)
+            {
+                return;
+            }
+
+            var version = PackageInfo.FindForAssembly(typeof(RenderKitFreshness).Assembly)?.version;
+
+            if (string.IsNullOrEmpty(version))
+            {
+                return;
+            }
+
+            var seen =
+                File.Exists(SeenVersionPath)
+                    ? File.ReadAllText(SeenVersionPath).Trim()
+                    : null;
+
+            Directory.CreateDirectory(Path.GetDirectoryName(SeenVersionPath));
+
+            File.WriteAllText(
+                SeenVersionPath,
+                version);
+
+            if (seen == null
+             || string.Equals(
+                    GetRenderingVersion(seen),
+                    GetRenderingVersion(version),
+                    StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            var message =
+                $"Render Kit обновлён с {seen} до {version}: изменилась средняя цифра, то есть рендеринг или импорт. "
+              + "Картинка локации могла измениться. Проверьте локацию и сделайте новый выпуск: "
+              + "игра не примет версию, выпущенную со старым Render Kit.";
+
+            Debug.LogWarning($"{LogPrefix} {message}");
+
+            EditorUtility.DisplayDialog(
+                "Изменился рендеринг",
+                message,
+                "Понятно");
         }
 
         private static PackageInfo GetGitPackage()
@@ -109,6 +162,20 @@ namespace PaperFly.RenderKit.Release
 
             // Адрес без хеша: Package Manager берёт последний коммит ветки по умолчанию и обновляет lock-файл.
             Client.Add(GetAddress(package));
+        }
+
+        /// <summary>
+        /// Часть версии Render Kit, которая отвечает за рендеринг и импорт: первые две цифры.
+        /// </summary>
+        /// <param name="version">Версия, например «0.2.1».</param>
+        /// <returns>Например «0.2».</returns>
+        public static string GetRenderingVersion(string version)
+        {
+            var parts = (version ?? string.Empty).Split('.');
+
+            return parts.Length < 2
+                ? version ?? string.Empty
+                : $"{parts[0]}.{parts[1]}";
         }
 
         /// <summary>

@@ -17,7 +17,7 @@ namespace PaperFly.RenderKit.Acceptance
     /// Убирает из вариантов и сцен игры правки, которые указывают на объекты, удалённые из новой версии локации.
     /// </summary>
     /// <remarks>
-    /// Сначала добавленное на удалённые объекты (компоненты, дочерние объекты) переносится в «карманы»
+    /// Сначала добавленное на удалённые объекты (компоненты, дочерние объекты) переносится в объекты «_Потерянное …»
     /// <see cref="LostOverrideRescue.HolderPrefix"/>, затем остальное убирает встроенное в Unity удаление неиспользуемых
     /// правок (то же, что Overrides → Unused → Remove) у экземпляров префабов из пакетов локаций.
     /// </remarks>
@@ -75,7 +75,7 @@ namespace PaperFly.RenderKit.Acceptance
                    SceneExtension,
                    StringComparison.OrdinalIgnoreCase);
 
-        // Переносит добавленное в «карманы» прямо в тексте файла, пока Unity его не загрузила и не потеряла.
+        // Переносит добавленное в «_Потерянное …» прямо в тексте файла, пока Unity его не загрузила и не потеряла.
         private static bool Rescue(
             string path,
             ILostTargets targets)
@@ -87,10 +87,21 @@ namespace PaperFly.RenderKit.Acceptance
                     file,
                     targets);
 
-            if (!LostOverrideRescue.Rescue(
+            // До переноса: перенос перестраивает списки правок, и номера строк ссылок сместились бы.
+            var cleared =
+                LostReferenceFinder.Clear(
+                    LostReferenceFinder.Find(
+                        file,
+                        targets));
+
+            var rescued =
+                LostOverrideRescue.Rescue(
                     file,
                     items,
-                    targets))
+                    targets);
+
+            if (!cleared
+             && !rescued)
             {
                 return false;
             }
@@ -106,29 +117,143 @@ namespace PaperFly.RenderKit.Acceptance
             return true;
         }
 
+        // Открытый на редактирование префаб при сохранении из редактора затёр бы изменения файла, поэтому его нужно закрыть.
+        private static bool TryCloseStage(
+            string path,
+            ICollection<string> skipped)
+        {
+            var stage = PrefabStageUtility.GetCurrentPrefabStage();
+
+            if (stage == null
+             || !string.Equals(
+                    stage.assetPath,
+                    path,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (stage.scene.isDirty)
+            {
+                skipped.Add($"{path}: префаб открыт на редактирование и в нём есть несохранённые изменения. Сохраните или отмените их и нажмите кнопку ещё раз.");
+
+                return false;
+            }
+
+            StageUtility.GoToMainStage();
+
+            return true;
+        }
+
+        private static int DestroyHolders(IEnumerable<GameObject> roots)
+        {
+            var holders =
+                roots
+                    .SelectMany(root => root.GetComponentsInChildren<Transform>(true))
+                    .Where(transform => transform.name.StartsWith(
+                        LostOverrideRescue.HolderPrefix,
+                        StringComparison.Ordinal))
+                    .Select(transform => transform.gameObject)
+                    .ToList();
+
+            // Вложенный «_Потерянное» уничтожается вместе с родительским.
+            foreach (var holder in holders.Where(holder => holder != null))
+            {
+                UnityEngine.Object.DestroyImmediate(holder);
+            }
+
+            return holders.Count;
+        }
+
+        private static bool RemoveHoldersFromPrefab(
+            string path,
+            ICollection<string> skipped)
+        {
+            if (!TryCloseStage(
+                    path,
+                    skipped))
+            {
+                return false;
+            }
+
+            var root = PrefabUtility.LoadPrefabContents(path);
+
+            try
+            {
+                if (DestroyHolders(new[] { root }) == 0)
+                {
+                    return false;
+                }
+
+                PrefabUtility.SaveAsPrefabAsset(
+                    root,
+                    path);
+
+                return true;
+            }
+            finally
+            {
+                PrefabUtility.UnloadPrefabContents(root);
+            }
+        }
+
+        private static bool RemoveHoldersFromScene(
+            string path,
+            ICollection<string> skipped)
+        {
+            var scene = SceneManager.GetSceneByPath(path);
+            var wasOpen = scene.isLoaded;
+
+            if (wasOpen
+             && HasDirtyScenes())
+            {
+                skipped.Add($"{path}: сцена открыта, а в открытых сценах есть несохранённые изменения. Сохраните их и нажмите кнопку ещё раз.");
+
+                return false;
+            }
+
+            if (!wasOpen)
+            {
+                scene =
+                    EditorSceneManager.OpenScene(
+                        path,
+                        OpenSceneMode.Additive);
+            }
+
+            try
+            {
+                if (DestroyHolders(scene.GetRootGameObjects()) == 0)
+                {
+                    return false;
+                }
+
+                EditorSceneManager.MarkSceneDirty(scene);
+                EditorSceneManager.SaveScene(scene);
+
+                return true;
+            }
+            finally
+            {
+                if (!wasOpen)
+                {
+                    EditorSceneManager.CloseScene(
+                        scene,
+                        true);
+                }
+            }
+        }
+
         private static string CleanPrefab(
             string path,
             ILostTargets targets,
             IReadOnlyCollection<string> locationFolders,
             ICollection<string> skipped)
         {
-            var stage = PrefabStageUtility.GetCurrentPrefabStage();
-
-            // Открытый на редактирование префаб при сохранении из редактора затёр бы перенос, поэтому его нужно закрыть.
-            if (stage != null
-             && string.Equals(
-                    stage.assetPath,
+            if (!TryCloseStage(
                     path,
-                    StringComparison.OrdinalIgnoreCase))
+                    skipped))
             {
-                if (stage.scene.isDirty)
-                {
-                    skipped.Add($"{path}: префаб открыт на редактирование и в нём есть несохранённые изменения. Сохраните или отмените их и нажмите кнопку ещё раз.");
-
-                    return null;
-                }
-
-                StageUtility.GoToMainStage();
+                return null;
             }
 
             var before = File.ReadAllText(path);
@@ -265,7 +390,7 @@ namespace PaperFly.RenderKit.Acceptance
         }
 
         /// <summary>
-        /// Описывает, что потеряно в указанных файлах и что будет перенесено в «карманы».
+        /// Описывает, что потеряно в указанных файлах и что будет перенесено в объекты «_Потерянное …».
         /// </summary>
         /// <param name="files">Файлы игры с потерянными правками.</param>
         /// <param name="targets">Сведения об объектах подключённых версий локаций.</param>
@@ -287,12 +412,20 @@ namespace PaperFly.RenderKit.Acceptance
                     continue;
                 }
 
+                var parsed = UnityYamlFile.Parse(File.ReadAllText(file));
+
                 var items =
                     LostOverrideRescue.Find(
-                        UnityYamlFile.Parse(File.ReadAllText(file)),
+                        parsed,
+                        targets);
+
+                var references =
+                    LostReferenceFinder.Find(
+                        parsed,
                         targets);
 
                 report.AddRange(items.Select(item => "    " + item.Description));
+                report.AddRange(references.Select(reference => $"    {reference.Description} → ссылка станет пустой: назначьте её заново"));
             }
 
             return report;
@@ -323,7 +456,7 @@ namespace PaperFly.RenderKit.Acceptance
         }
 
         /// <summary>
-        /// Переносит добавленное в «карманы» и убирает потерянные правки из указанных файлов игры.
+        /// Переносит добавленное в объекты «_Потерянное …» и убирает потерянные правки из указанных файлов игры.
         /// </summary>
         /// <param name="files">Файлы игры, в которых проверка приёма нашла потерянные правки.</param>
         /// <param name="targets">Сведения об объектах подключённых версий локаций.</param>
@@ -380,6 +513,42 @@ namespace PaperFly.RenderKit.Acceptance
             AssetDatabase.SaveAssets();
 
             return cleaned;
+        }
+
+        /// <summary>
+        /// Удаляет объекты «_Потерянное …» вместе со всем, что в них перенесено.
+        /// </summary>
+        /// <param name="files">Сцены и префабы игры с такими объектами.</param>
+        /// <param name="skipped">Сюда добавляются файлы, которые не удалось обработать, с причиной.</param>
+        /// <returns>Изменённые файлы.</returns>
+        public static List<string> RemoveHolders(
+            IEnumerable<string> files,
+            ICollection<string> skipped)
+        {
+            var changed = new List<string>();
+
+            foreach (var file in files.Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                var isChanged =
+                    file.EndsWith(
+                        PrefabExtension,
+                        StringComparison.OrdinalIgnoreCase)
+                        ? RemoveHoldersFromPrefab(
+                            file,
+                            skipped)
+                        : RemoveHoldersFromScene(
+                            file,
+                            skipped);
+
+                if (isChanged)
+                {
+                    changed.Add(file);
+                }
+            }
+
+            AssetDatabase.SaveAssets();
+
+            return changed;
         }
     }
 }

@@ -27,9 +27,19 @@ namespace PaperFly.RenderKit.Acceptance
         private const string RenderKitRule = "Версия Render Kit";
 
         /// <summary>
-        /// Правило потерянных правок: по нему окно приёма находит файлы для кнопки «Убрать потерянные правки».
+        /// Правило потерянных правок: по нему окно приёма находит файлы для кнопки «Сохранить потерянные правки».
         /// </summary>
         public const string LostLinkRule = "Потерянная правка";
+
+        /// <summary>
+        /// Правило ссылок на удалённые объекты: такие файлы тоже обрабатывает кнопка «Сохранить потерянные правки».
+        /// </summary>
+        public const string LostReferenceRule = "Ссылка на удалённый объект";
+
+        /// <summary>
+        /// Правило объектов «_Потерянное …»: по нему окно приёма находит файлы для кнопки удаления.
+        /// </summary>
+        public const string HolderRule = "Потерянное";
 
         // Ссылка на префаб или модель целиком (m_SourcePrefab). Такого объекта нет среди содержимого файла, но он есть всегда.
         private const long PrefabAssetFileId = 100100000;
@@ -40,20 +50,19 @@ namespace PaperFly.RenderKit.Acceptance
 
         private const string GuidConflictRule = "Конфликт GUID";
 
-        private const string HolderRule = "Потерянное";
-
         private const string AssetsFolder = "Assets";
 
         private static readonly string[] HolderFileExtensions = { ".prefab", ".unity" };
 
-        private static readonly string[] Rules = { DeliveryRule, RenderKitRule, LostLinkRule, GuidConflictRule, HolderRule };
+        private static readonly string[] Rules = { DeliveryRule, RenderKitRule, LostLinkRule, LostReferenceRule, GuidConflictRule, HolderRule };
 
         private static bool CanHoldLost(string path)
             => HolderFileExtensions.Any(extension => path.EndsWith(
                 extension,
                 StringComparison.OrdinalIgnoreCase));
 
-        // Предупреждение остаётся, пока разработчик не разложит перенесённое из «кармана» и не удалит его.
+        // Ошибка остаётся, пока разработчик не разложит содержимое «_Потерянное …» по объектам или не удалит его:
+        // забытая логика на корне локации работала бы в игре не там, где задумано.
         private static void CheckHolders(IReadOnlyCollection<AcceptanceResult> results)
         {
             var files =
@@ -74,7 +83,7 @@ namespace PaperFly.RenderKit.Acceptance
                     continue;
                 }
 
-                // «Карман» висит на экземпляре локации, поэтому в файле есть GUID одного из её файлов.
+                // «_Потерянное …» висит на экземпляре локации, поэтому в файле есть GUID одного из её файлов.
                 var result =
                     results.FirstOrDefault(candidate => GetFiles(candidate.Location.Manifest)
                         .Where(entry => !string.IsNullOrEmpty(entry.guid))
@@ -97,10 +106,10 @@ namespace PaperFly.RenderKit.Acceptance
                 {
                     AddIssue(
                         result,
-                        ValidationSeverity.Warning,
+                        ValidationSeverity.Error,
                         assetPath,
                         HolderRule,
-                        $"«{holder}»: сюда перенесено то, что было добавлено на удалённый объект локации. Разложите содержимое по нужным объектам и удалите «{holder}».");
+                        $"«{holder}»: сюда перенесено то, что было добавлено на удалённый или переименованный объект локации. Перенесите нужное на объекты локации и удалите «{holder}» или удалите всё кнопкой «Удалить «{LostOverrideRescue.HolderPrefix} …»» в окне приёма.");
                 }
             }
         }
@@ -126,8 +135,8 @@ namespace PaperFly.RenderKit.Acceptance
                     conflict.GamePath,
                     GuidConflictRule,
                     conflict.IsIdentical
-                        ? $"Копия файла локации {conflict.PackagePath} с тем же GUID, содержимое совпадает. Удалите её из игры: ссылки игры сами перейдут на файл пакета."
-                        : $"Копия файла локации {conflict.PackagePath} с тем же GUID, содержимое отличается. Если в ней игровые правки, перенесите их в локацию (через художника) или вынесите поверх, затем удалите копию из игры.");
+                        ? $"Этот файл — копия {conflict.PackagePath} из пакета локации вместе с .meta, у них один GUID. Unity видит только один из двух файлов, и ссылки могут вести не туда. Содержимое совпадает: удалите копию из игры, ссылки сами перейдут на файл пакета."
+                        : $"Этот файл — копия {conflict.PackagePath} из пакета локации вместе с .meta, у них один GUID. Unity видит только один из двух файлов, и ссылки могут вести не туда. Содержимое отличается: если в копии игровые правки, перенесите их в вариант локации или попросите художника, затем удалите копию.");
             }
         }
 
@@ -175,7 +184,7 @@ namespace PaperFly.RenderKit.Acceptance
                     ValidationSeverity.Error,
                     location.AssetFolder,
                     DeliveryRule,
-                    $"В манифесте выпуска версия {manifest.version}, в package.json {location.Version}: версию выпустили без подготовки выпуска.");
+                    $"В манифесте выпуска версия {manifest.version}, в package.json {location.Version}: после «Подготовить выпуск» версию поменяли вручную. Манифест описывает другой выпуск, сравнивать с ним нельзя. Художнику нужно заново подготовить и выпустить версию.");
             }
 
             var renderKitVersion = PackageInfo.FindForAssembly(typeof(AcceptanceChecks).Assembly)?.version;
@@ -192,8 +201,8 @@ namespace PaperFly.RenderKit.Acceptance
             // Последняя — только инструменты: на локацию не влияет.
             var affectsLocation =
                 !string.Equals(
-                    GetRenderingVersion(manifest.renderKitVersion),
-                    GetRenderingVersion(renderKitVersion),
+                    RenderKitFreshness.GetRenderingVersion(manifest.renderKitVersion),
+                    RenderKitFreshness.GetRenderingVersion(renderKitVersion),
                     StringComparison.Ordinal);
 
             AddIssue(
@@ -204,30 +213,17 @@ namespace PaperFly.RenderKit.Acceptance
                 location.AssetFolder,
                 RenderKitRule,
                 affectsLocation
-                    ? $"Локация выпущена с Render Kit {manifest.renderKitVersion}, в игре стоит {renderKitVersion}: изменились рендеринг или импорт. Художнику нужно обновить Render Kit, проверить локацию и выпустить её заново."
-                    : $"Локация выпущена с Render Kit {manifest.renderKitVersion}, в игре стоит {renderKitVersion}: изменились только инструменты, на локацию это не влияет.");
-        }
-
-        // «0.2.1» → «0.2»: часть версии Render Kit, которая отвечает за рендеринг и импорт.
-        private static string GetRenderingVersion(string version)
-        {
-            var parts = (version ?? string.Empty).Split('.');
-
-            return parts.Length < 2
-                ? version ?? string.Empty
-                : $"{parts[0]}.{parts[1]}";
+                    ? $"Локация выпущена с Render Kit {manifest.renderKitVersion}, в игре стоит {renderKitVersion}. Отличается средняя цифра: изменились рендеринг или импорт, и картинка в игре может отличаться от той, что проверял художник. Художнику нужно открыть локацию (Render Kit обновится сам), проверить картинку и выпустить её заново."
+                    : $"Локация выпущена с Render Kit {manifest.renderKitVersion}, в игре стоит {renderKitVersion}. Отличается только последняя цифра: изменились инструменты, картинка локации та же.");
         }
 
         // Unity при подключении молча пропускает ошибки LFS, поэтому пустые модели и текстуры видны только при сверке файлов.
         private static void CheckDelivery(AcceptanceResult result)
         {
             var location = result.Location;
-            var expected = new HashSet<string>(StringComparer.Ordinal);
 
             foreach (var entry in location.Manifest.files)
             {
-                expected.Add(entry.path);
-
                 var diskPath =
                     Path.Combine(
                         location.DiskFolder,
@@ -251,7 +247,7 @@ namespace PaperFly.RenderKit.Acceptance
                         ValidationSeverity.Error,
                         assetPath,
                         DeliveryRule,
-                        $"Вместо файла {entry.path} пришёл указатель LFS: проверьте .gitattributes в папке пакета и что файл отправлен в LFS.");
+                        $"Файл {entry.path} пришёл пустым: вместо модели или текстуры в git лежит только ссылка на хранилище LFS, а сам файл туда не загружен. Художнику нужно проверить .gitattributes в Assets/Location и отправить файл ещё раз.");
                 }
                 else if (!string.Equals(
                              entry.path,
@@ -269,33 +265,6 @@ namespace PaperFly.RenderKit.Acceptance
                         DeliveryRule,
                         $"Файл {entry.path} отличается от выпущенного.");
                 }
-            }
-
-            var extraFiles =
-                Directory
-                    .GetFiles(
-                        location.DiskFolder,
-                        "*",
-                        SearchOption.AllDirectories)
-                    .Select(path => path
-                        .Substring(location.DiskFolder.Length + 1)
-                        .Replace(
-                            '\\',
-                            '/'))
-                    .Where(path => !string.Equals(
-                        path,
-                        ReleaseManifest.FileName,
-                        StringComparison.OrdinalIgnoreCase))
-                    .Where(path => !expected.Contains(path));
-
-            foreach (var path in extraFiles)
-            {
-                AddIssue(
-                    result,
-                    ValidationSeverity.Warning,
-                    $"{location.AssetFolder}/{path}",
-                    DeliveryRule,
-                    $"Файл {path} не описан в манифесте выпуска.");
             }
         }
 
@@ -361,6 +330,9 @@ namespace PaperFly.RenderKit.Acceptance
 
             var targets = new LocationLostTargets(new[] { result });
 
+            // Сцены и префабы разбираются целиком: так видно, какая правка или какое поле указывает на удалённый объект.
+            var parsedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
             foreach (var reference in references)
             {
                 if (!currentFiles.TryGetValue(
@@ -391,27 +363,88 @@ namespace PaperFly.RenderKit.Acceptance
                     continue;
                 }
 
+                if (CanHoldLost(reference.Source))
+                {
+                    parsedFiles.Add(reference.Source);
+
+                    continue;
+                }
+
                 var lostTarget =
                     DescribeLostTarget(
                         result,
                         reference,
                         currentAsset);
 
-                var message =
-                    targets.TryGetRenamed(
-                        reference.Guid,
-                        reference.FileId,
-                        out _,
-                        out var renamedPath)
-                        ? $"Правка указывает на {lostTarget}: в версии {manifest.version} объект, вероятно, переименован в {renamedPath}. Нажмите «Убрать потерянные правки» в окне приёма: правка перейдёт на новый объект."
-                        : $"Правка указывает на {lostTarget}, которого нет в версии {manifest.version}. Нажмите «Убрать потерянные правки» в окне приёма: добавленное на этот объект перейдёт в «{LostOverrideRescue.HolderPrefix} …», остальные правки будут удалены, список сохранится в отчёт.";
-
                 AddIssue(
                     result,
                     ValidationSeverity.Error,
                     reference.Source,
                     LostLinkRule,
-                    message);
+                    $"Ссылается на {lostTarget}, которого нет в версии {manifest.version}. Назначьте ссылку заново вручную.");
+            }
+
+            foreach (var path in parsedFiles)
+            {
+                CheckLostLinksInFile(
+                    result,
+                    path,
+                    targets);
+            }
+        }
+
+        private static void CheckLostLinksInFile(
+            AcceptanceResult result,
+            string path,
+            ILostTargets targets)
+        {
+            var version = result.Location.Manifest.version;
+            var file = UnityYamlFile.Parse(File.ReadAllText(path));
+
+            var lostItems =
+                LostOverrideRescue
+                    .Find(
+                        file,
+                        targets)
+                    .GroupBy(item => ManifestComparer.GetKey(
+                        item.Target.Guid,
+                        item.Target.FileId));
+
+            foreach (var group in lostItems)
+            {
+                var item = group.First();
+
+                var renamed =
+                    item.RenamedPath == null
+                        ? string.Empty
+                        : $" (вероятно, переименован в {item.RenamedPath})";
+
+                var target =
+                    targets.Describe(
+                        item.Target.Guid,
+                        item.Target.FileId);
+
+                AddIssue(
+                    result,
+                    ValidationSeverity.Error,
+                    path,
+                    LostLinkRule,
+                    $"Правки на {target}{renamed}: этого объекта нет в версии {version}, правок — {group.Count()}. Нажмите «Сохранить потерянные правки» в окне приёма: добавленные компоненты и дочерние объекты перейдут в «{LostOverrideRescue.HolderPrefix} …», изменённые поля попадут в отчёт.");
+            }
+
+            var lostReferences =
+                LostReferenceFinder.Find(
+                    file,
+                    targets);
+
+            foreach (var reference in lostReferences)
+            {
+                AddIssue(
+                    result,
+                    ValidationSeverity.Error,
+                    path,
+                    LostReferenceRule,
+                    $"Ссылка станет пустой: {reference}. Этого объекта нет в версии {version}. Нажмите «Сохранить потерянные правки»: ссылка попадёт в отчёт, затем назначьте её заново.");
             }
         }
 

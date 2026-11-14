@@ -20,6 +20,10 @@ Unity проверяет проект в том виде, в каком он о�
 accept — проверка приёма в игре, её вызывает хук pre-commit, когда в коммит попадает новая версия пакета
 локации. Подключённые версии должны пройти проверку и быть приняты в окне «Приём локаций».
 
+commit — быстрая проверка у художника, её вызывает хук pre-commit. Проверяются только файлы пакета,
+которые попадают в коммит, и только если проект открыт в Unity: запускать Unity без окна на каждый
+коммит слишком долго. Полная проверка остаётся при отправке.
+
 .PARAMETER TimeoutSeconds
 Сколько ждать ответа открытой Unity.
 #>
@@ -104,6 +108,16 @@ function Wait-OpenEditor([string] $resultPath, [string] $requestId) {
     return $null
 }
 
+# Смотрим только папки пакетов: остальной проект в игру не попадает.
+# package.json есть и у сторонних библиотек (Zenject), поэтому берутся только пакеты локаций:
+# с ключевым словом paperfly-location или с манифестом выпуска.
+function Get-PackageFolders {
+    return @(git ls-files -- 'Assets/**/package.json' | Where-Object {
+        $folder = Split-Path $_ -Parent
+        (Select-String -LiteralPath $_ -Pattern '"paperfly-location"' -SimpleMatch -Quiet) -or (Test-Path (Join-Path $folder 'release-manifest.json'))
+    } | ForEach-Object { Split-Path $_ -Parent })
+}
+
 function Get-ReleaseErrors([string[]] $pushedRefs) {
     $errors = @()
     $head = (git rev-parse HEAD).Trim()
@@ -116,23 +130,15 @@ function Get-ReleaseErrors([string[]] $pushedRefs) {
         $short = $commit.Substring(0, 7)
 
         if ($commit -ne $head) {
-            $errors += "Отправляется коммит $short, а проект открыт на $($head.Substring(0, 7)). Переключитесь на отправляемый коммит и повторите push."
+            $errors += "Отправляется коммит $short, а в Unity сейчас открыт коммит $($head.Substring(0, 7)). Проверка смотрит на файлы, открытые в Unity, и проверила бы не то, что уходит на сервер. Переключитесь в Fork на отправляемую ветку (Checkout) и повторите push."
         }
     }
 
-    # Смотрим только папки пакетов: остальной проект в выпуск не входит.
-    # package.json есть и у сторонних библиотек (Zenject), поэтому берутся только пакеты локаций:
-    # с ключевым словом paperfly-location или с манифестом выпуска.
-    $packageFolders = @(git ls-files -- 'Assets/**/package.json' | Where-Object {
-        $folder = Split-Path $_ -Parent
-        (Select-String -LiteralPath $_ -Pattern '"paperfly-location"' -SimpleMatch -Quiet) -or (Test-Path (Join-Path $folder 'release-manifest.json'))
-    } | ForEach-Object { Split-Path $_ -Parent })
-
-    foreach ($folder in $packageFolders) {
+    foreach ($folder in Get-PackageFolders) {
         $changes = @(git status --porcelain --untracked-files=all -- $folder)
 
         if ($changes.Count -gt 0) {
-            $errors += "В папке пакета $($folder.Replace('\', '/')) есть незакоммиченные изменения ($($changes.Count)), проверка увидела бы не ту версию. Закоммитьте или отмените их."
+            $errors += "В папке пакета $($folder.Replace('\', '/')) есть незакоммиченные изменения ($($changes.Count)): Unity проверила бы их, а на сервер они не уйдут. Закоммитьте или отмените их."
         }
     }
 
@@ -167,12 +173,35 @@ $project = (git rev-parse --show-toplevel).Replace('/', '\')
 Set-Location $project
 
 $isAcceptance = $Mode -eq 'accept'
+$isCommit = $Mode -eq 'commit'
 $cancelled = 'push отменён'
+$requestFiles = @()
 
 if ($isAcceptance) {
     $mode = 'accept'
     $cancelled = 'коммит отменён'
     Write-Host "В коммите новая версия пакетов: проверка приёма локаций..."
+}
+elseif ($isCommit) {
+    $mode = 'commit'
+    $cancelled = 'коммит отменён'
+    $folders = @(Get-PackageFolders | ForEach-Object { $_.Replace('\', '/') })
+
+    if ($folders.Count -gt 0) {
+        $requestFiles = @(git diff --cached --name-only --diff-filter=ACMR -- $folders)
+    }
+
+    if ($requestFiles.Count -eq 0) {
+        exit 0
+    }
+
+    if (-not (Test-UnityOpen $project)) {
+        Write-Host "Unity закрыта: быстрая проверка коммита пропущена. Полная проверка будет перед отправкой."
+
+        exit 0
+    }
+
+    Write-Host "Быстрая проверка файлов коммита ($($requestFiles.Count))..."
 }
 else {
     $mode = 'push'
@@ -202,7 +231,7 @@ $requestId = [guid]::NewGuid().ToString('N')
 
 New-Item -ItemType Directory -Force -Path $folder | Out-Null
 Remove-Item -LiteralPath $resultPath -ErrorAction SilentlyContinue
-[System.IO.File]::WriteAllText($requestPath, "$requestId`n$mode")
+[System.IO.File]::WriteAllText($requestPath, (@($requestId, $mode) + $requestFiles) -join "`n")
 
 $started = Get-Date
 

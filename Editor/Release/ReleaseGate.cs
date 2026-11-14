@@ -29,7 +29,11 @@ namespace PaperFly.RenderKit.Release
 
         private const string AcceptancePrefix = "[Проверка приёма локаций]";
 
+        private const string CommitPrefix = "[Проверка коммита]";
+
         private const string ReleaseMode = "release";
+
+        private const string CommitMode = "commit";
 
         private const string AcceptMode = "accept";
 
@@ -61,8 +65,8 @@ namespace PaperFly.RenderKit.Release
 
         private static bool HandleRequest()
         {
-            // Первая строка запроса — его номер, вторая — режим: push, release при отправке тега версии
-            // или accept при коммите новой версии локации в игре.
+            // Первая строка запроса — его номер, вторая — режим: push, release при отправке тега версии,
+            // commit при коммите у художника (дальше — файлы коммита) или accept при коммите новой версии локации в игре.
             var request = File.ReadAllLines(RequestPath);
             File.Delete(RequestPath);
 
@@ -73,19 +77,30 @@ namespace PaperFly.RenderKit.Release
                     ? request[1].Trim()
                     : string.Empty;
 
-            var isAcceptance =
-                string.Equals(
+            List<string> errors;
+
+            if (string.Equals(
                     mode,
                     AcceptMode,
-                    StringComparison.Ordinal);
-
-            var errors =
-                isAcceptance
-                    ? AcceptanceChecks.RunForGate()
-                    : ReleaseChecks.Run(string.Equals(
+                    StringComparison.Ordinal))
+            {
+                errors = AcceptanceChecks.RunForGate();
+            }
+            else if (string.Equals(
+                         mode,
+                         CommitMode,
+                         StringComparison.Ordinal))
+            {
+                errors = ReleaseChecks.RunForCommit(request.Skip(2).Where(line => line.Trim().Length > 0));
+            }
+            else
+            {
+                errors =
+                    ReleaseChecks.Run(string.Equals(
                         mode,
                         ReleaseMode,
                         StringComparison.Ordinal));
+            }
 
             WriteResult(
                 requestId,
@@ -93,7 +108,7 @@ namespace PaperFly.RenderKit.Release
 
             Report(
                 errors,
-                isAcceptance);
+                mode);
 
             return errors.Count == 0;
         }
@@ -121,15 +136,30 @@ namespace PaperFly.RenderKit.Release
 
         private static void Report(
             IReadOnlyList<string> errors,
-            bool isAcceptance)
+            string mode)
         {
+            var isAcceptance =
+                string.Equals(
+                    mode,
+                    AcceptMode,
+                    StringComparison.Ordinal);
+
+            var isCommit =
+                isAcceptance
+             || string.Equals(
+                    mode,
+                    CommitMode,
+                    StringComparison.Ordinal);
+
             var prefix =
                 isAcceptance
                     ? AcceptancePrefix
-                    : PushPrefix;
+                    : isCommit
+                        ? CommitPrefix
+                        : PushPrefix;
 
             var action =
-                isAcceptance
+                isCommit
                     ? "коммит"
                     : "отправку";
 
@@ -149,7 +179,7 @@ namespace PaperFly.RenderKit.Release
             if (errors.Count == 0)
             {
                 Debug.Log(
-                    isAcceptance
+                    isCommit
                         ? $"{prefix} Ошибок нет, коммит разрешён."
                         : $"{prefix} Ошибок нет, отправка разрешена.");
 
@@ -157,7 +187,7 @@ namespace PaperFly.RenderKit.Release
             }
 
             Debug.LogError(
-                isAcceptance
+                isCommit
                     ? $"{prefix} Коммит отменён, ошибок: {errors.Count}."
                     : $"{prefix} Отправка отменена, ошибок: {errors.Count}.");
 
