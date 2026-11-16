@@ -364,14 +364,29 @@ namespace PaperFly.RenderKit.Release
         }
 
         /// <summary>
-        /// Поля package.json, которые нужны проверке. Имена совпадают с ключами JSON, как требует JsonUtility.
+        /// Поля package.json, которые нужны проверке. Имена полей совпадают с ключами JSON, как требует JsonUtility.
         /// </summary>
+        /// <remarks>
+        /// Поля приватные: для них правило стиля разрешает строчные имена, и автоформатирование их не переименует.
+        /// </remarks>
         [Serializable]
         private sealed class PackageManifest
         {
-            public string Name;
+            [SerializeField]
+            private string name;
 
-            public string Version;
+            [SerializeField]
+            private string version;
+
+            /// <summary>
+            /// Имя пакета.
+            /// </summary>
+            public string Name => this.name;
+
+            /// <summary>
+            /// Версия пакета.
+            /// </summary>
+            public string Version => this.version;
         }
     }
 }
