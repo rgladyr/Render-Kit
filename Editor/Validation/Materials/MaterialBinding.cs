@@ -127,8 +127,6 @@ namespace PaperFly.RenderKit.Validation.Materials
         {
             var folder = GetExtractFolder(slot.ModelPath);
 
-            EnsureFolder(folder);
-
             var path = AssetDatabase.GenerateUniqueAssetPath($"{folder}/{ToFileName(slot.Name)}{MaterialExtension}");
 
             var error =
@@ -264,12 +262,29 @@ namespace PaperFly.RenderKit.Validation.Materials
                     choice.Target);
             }
 
+            var extracted =
+                choices
+                    .Where(choice => choice.Target == null)
+                    .ToList();
+
+            // Папки создаются до пакетного режима: внутри него только что созданная папка ещё не видна,
+            // и для каждого материала создавалась бы новая (Childhood 1.v2, Childhood 2.v2…).
+            var folders =
+                extracted
+                    .Select(choice => GetExtractFolder(choice.Slot.ModelPath))
+                    .Distinct(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var folder in folders)
+            {
+                EnsureFolder(folder);
+            }
+
             // Извлечение создаёт файлы .mat и само дописывает привязку в настройки импорта модели.
             AssetDatabase.StartAssetEditing();
 
             try
             {
-                foreach (var choice in choices.Where(choice => choice.Target == null))
+                foreach (var choice in extracted)
                 {
                     Extract(choice.Slot);
                 }
