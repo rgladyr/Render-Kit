@@ -20,6 +20,8 @@ namespace PaperFly.RenderKit.Validation.Materials
 
         private const string MaterialsFolder = "Materials";
 
+        private const string TexturesFolder = "Textures";
+
         private const string MaterialExtension = ".mat";
 
         private const char PathSeparator = '/';
@@ -46,12 +48,20 @@ namespace PaperFly.RenderKit.Validation.Materials
         private static string GetPackageFolder(string modelPath)
             => LocationAssets.FindPackageFolder(modelPath) ?? AssetsFolder;
 
-        // Models/Locations/Childhood.v2.fbx → Materials/Locations/Childhood.v2, как уже разложены материалы пакета.
+        // Models/Childhood.v2.fbx → Materials.
         private static string GetExtractFolder(string modelPath)
+            => GetExtractFolder(
+                modelPath,
+                MaterialsFolder);
+
+        // Models/Childhood.v2.fbx → Textures или Materials. Отдельная папка на модель не нужна: пакет и так один
+        // на локацию. Подпапки внутри Models повторяются: Models/Props/Rock.fbx → Materials/Props.
+        private static string GetExtractFolder(
+            string modelPath,
+            string kindFolder)
         {
             var packageFolder = GetPackageFolder(modelPath);
             var modelFolder = GetParent(modelPath);
-            var modelName = Path.GetFileNameWithoutExtension(modelPath);
 
             var relative =
                 modelFolder.Length > packageFolder.Length
@@ -69,17 +79,67 @@ namespace PaperFly.RenderKit.Validation.Materials
                     ModelsFolder,
                     StringComparison.OrdinalIgnoreCase))
             {
-                segments[0] = MaterialsFolder;
+                segments[0] = kindFolder;
 
                 return string.Join(
                     PathSeparator.ToString(),
-                    new[] { packageFolder }
-                        .Concat(segments)
-                        .Append(modelName));
+                    new[] { packageFolder }.Concat(segments));
             }
 
-            return $"{modelFolder}/{MaterialsFolder}/{modelName}";
+            return $"{modelFolder}/{kindFolder}";
         }
+
+        // Текстуры, встроенные в FBX, извлекаются раньше материалов: тогда извлечённый материал сразу ссылается
+        // на файлы текстур, а не на копии внутри модели, и ничего не нужно привязывать заново вручную.
+        // Встроенные текстуры не видны среди содержимого модели, поэтому извлечение запускается всегда,
+        // а пустая папка, если текстур в модели не было, удаляется.
+        private static bool ExtractTextures(string modelPath)
+        {
+            if (!(AssetImporter.GetAtPath(modelPath) is ModelImporter importer))
+            {
+                return false;
+            }
+
+            var folder =
+                GetExtractFolder(
+                    modelPath,
+                    TexturesFolder);
+
+            var existed = AssetDatabase.IsValidFolder(folder);
+
+            EnsureFolder(folder);
+
+            var isExtracted = importer.ExtractTextures(folder);
+
+            AssetDatabase.Refresh();
+
+            var isEmpty =
+                AssetDatabase
+                    .FindAssets(
+                        string.Empty,
+                        new[] { folder })
+                    .Length == 0;
+
+            if (isEmpty
+             && !existed)
+            {
+                AssetDatabase.DeleteAsset(folder);
+            }
+
+            return isExtracted
+                && !isEmpty;
+        }
+
+        // После извлечения текстур модель переимпортирована, и прежние объекты материалов из неё недействительны.
+        private static Material FindEmbedded(MaterialSlot slot)
+            => AssetDatabase
+                   .LoadAllAssetsAtPath(slot.ModelPath)
+                   .OfType<Material>()
+                   .FirstOrDefault(material => string.Equals(
+                       material.name,
+                       slot.Name,
+                       StringComparison.OrdinalIgnoreCase))
+            ?? slot.Embedded;
 
         private static void EnsureFolder(string folder)
         {
@@ -131,7 +191,7 @@ namespace PaperFly.RenderKit.Validation.Materials
 
             var error =
                 AssetDatabase.ExtractAsset(
-                    slot.Embedded,
+                    FindEmbedded(slot),
                     path);
 
             if (!string.IsNullOrEmpty(error))
@@ -266,6 +326,32 @@ namespace PaperFly.RenderKit.Validation.Materials
                 choices
                     .Where(choice => choice.Target == null)
                     .ToList();
+
+            // Привязки записываются до извлечения текстур: переимпорт модели иначе потерял бы их.
+            foreach (var model in models)
+            {
+                AssetDatabase.WriteImportSettingsIfDirty(model);
+            }
+
+            var texturesExtracted =
+                extracted
+                    .Select(choice => choice.Slot.ModelPath)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Where(ExtractTextures)
+                    .ToList();
+
+            // Модель переимпортируется, чтобы её материалы сослались на извлечённые файлы текстур.
+            if (texturesExtracted.Count > 0)
+            {
+                AssetDatabase.Refresh();
+
+                foreach (var model in texturesExtracted)
+                {
+                    AssetDatabase.ImportAsset(
+                        model,
+                        ImportAssetOptions.ForceUpdate);
+                }
+            }
 
             // Папки создаются до пакетного режима: внутри него только что созданная папка ещё не видна,
             // и для каждого материала создавалась бы новая (Childhood 1.v2, Childhood 2.v2…).
