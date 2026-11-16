@@ -234,8 +234,15 @@ namespace PaperFly.RenderKit.Versions
             string message,
             Func<Task> operation)
         {
+            // Нажатие во время другой операции не должно пропадать молча.
             if (this.isBusy)
             {
+                this.SetStatus(
+                    "Идёт другая операция: дождитесь окончания и нажмите ещё раз.",
+                    MessageType.Warning);
+
+                this.Repaint();
+
                 return;
             }
 
@@ -630,18 +637,28 @@ namespace PaperFly.RenderKit.Versions
                 return;
             }
 
+            // Нажатие ловится по MouseDown: обычной кнопке нужны и нажатие, и отпускание над ней, а между ними окно
+            // может перерисоваться (статус, загрузка истории), и клик пропадает без следа.
+            var current = Event.current;
+
+            if (current.type == EventType.MouseDown
+             && current.button == 0
+             && buttonRect.Contains(current.mousePosition))
+            {
+                current.Use();
+
+                _ = this.RunAsync(
+                    $"Подключаю {commit.ShortHash}…",
+                    () => this.ConnectCommitAsync(
+                        selected,
+                        commit.Hash));
+            }
+
             using (new EditorGUI.DisabledScope(this.isBusy))
             {
-                if (GUI.Button(
+                GUI.Button(
                     buttonRect,
-                    "Подключить"))
-                {
-                    _ = this.RunAsync(
-                        $"Подключаю {commit.ShortHash}…",
-                        () => this.ConnectCommitAsync(
-                            selected,
-                            commit.Hash));
-                }
+                    "Подключить");
             }
         }
     }
