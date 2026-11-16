@@ -167,7 +167,7 @@ namespace PaperFly.RenderKit.Release
 
             if (entry.Previous == null)
             {
-                return "Первый выпуск этой локации.";
+                return "Первый выпуск этой локации, обычно 1.0.0.";
             }
 
             if (entry.Previous.format != ReleaseManifest.CurrentFormat)
@@ -247,12 +247,32 @@ namespace PaperFly.RenderKit.Release
                 return "Версия должна быть в виде 1.2.3.";
             }
 
-            if (TryParse(
+            // Сравнивается с последним выпуском, то есть с тегами. Версия в package.json до первого выпуска
+            // ничего не значит (в шаблоне 0.1.0), а после неотправленной подготовки её можно записать ещё раз.
+            var released =
+                this.tags
+                    .Select(tag => TryParse(
+                        tag,
+                        out var version)
+                        ? version
+                        : null)
+                    .Where(version => version != null)
+                    .DefaultIfEmpty()
+                    .Max();
+
+            if (released != null
+             && newVersion <= released)
+            {
+                return $"Новая версия должна быть выше последнего выпуска {released}.";
+            }
+
+            if (this.tagsUnavailable
+             && TryParse(
                     entry.Package.Version,
                     out var currentVersion)
-             && newVersion <= currentVersion)
+             && newVersion < currentVersion)
             {
-                return $"Новая версия должна быть выше текущей {entry.Package.Version}.";
+                return $"Новая версия не может быть ниже текущей {entry.Package.Version}.";
             }
 
             return this.tags.Contains(entry.NewVersion)
