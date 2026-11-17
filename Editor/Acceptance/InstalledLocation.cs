@@ -30,7 +30,30 @@ namespace PaperFly.RenderKit.Acceptance
                     ReleaseManifest.FileName);
 
             this.Manifest = ManifestBuilder.LoadFile(this.ManifestPath);
+            this.CommitHash = package.git?.hash;
+
+            // Вид packageId: имя@https://github.com/org/repo.git?path=/Assets/Location#хеш.
+            var separator = package.packageId.IndexOf('@');
+
+            this.RepositoryUrl =
+                package.git == null
+                || separator < 0
+                    ? null
+                    : package.packageId
+                        .Substring(separator + 1)
+                        .Split('#')[0]
+                        .Split('?')[0];
         }
+
+        /// <summary>
+        /// Подключённый коммит; <c>null</c>, если пакет подключён не по git.
+        /// </summary>
+        public string CommitHash { get; }
+
+        /// <summary>
+        /// Адрес репозитория локации без пути и версии; <c>null</c>, если пакет подключён не по git.
+        /// </summary>
+        public string RepositoryUrl { get; }
 
         /// <summary>
         /// Имя пакета.

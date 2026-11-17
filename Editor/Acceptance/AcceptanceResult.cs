@@ -42,6 +42,11 @@ namespace PaperFly.RenderKit.Acceptance
         public bool IsAccepted { get; }
 
         /// <summary>
+        /// На подключённом коммите нет тега версии: это не выпуск, а коммит локации.
+        /// </summary>
+        public bool IsUntagged { get; set; }
+
+        /// <summary>
         /// Найденные проблемы.
         /// </summary>
         public List<ValidationIssue> Issues { get; } = new List<ValidationIssue>();
@@ -75,11 +80,12 @@ namespace PaperFly.RenderKit.Acceptance
         public List<string> HolderFiles => this.GetFiles(AcceptanceChecks.HolderRule);
 
         /// <summary>
-        /// Подключён коммит локации, а не выпуск: манифеста нет или он старого формата.
+        /// Подключён коммит локации, а не выпуск: манифеста нет, он старого формата или на коммите нет тега версии.
         /// </summary>
         public bool IsTrial
             => this.Location.Manifest == null
-            || this.Location.Manifest.format != ReleaseManifest.CurrentFormat;
+            || this.Location.Manifest.format != ReleaseManifest.CurrentFormat
+            || this.IsUntagged;
 
         /// <summary>
         /// Версию можно принять: это выпуск и ошибок нет.

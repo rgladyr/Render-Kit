@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -18,12 +19,21 @@ namespace PaperFly.RenderKit.Acceptance
     {
         private const string WindowTitle = "Приём локаций";
 
-        // Больше строк окно подтверждения не вмещает.
-        private const int DialogReportLines = 25;
+        private const float ChoiceWidth = 230f;
+
+        private const float SmallButtonWidth = 90f;
+
+        private static readonly string[] HolderOptions = { $"Сохранить в «{LostOverrideRescue.HolderPrefix}»", "Удалить" };
+
+        private static readonly string[] ReferenceOptions = { "Напоминать, пока не назначу", "Просто очистить" };
 
         private readonly HashSet<string> expanded = new HashSet<string>();
 
         private List<AcceptanceResult> results = new List<AcceptanceResult>();
+
+        private List<LostPlan> plans = new List<LostPlan>();
+
+        private List<LostReferenceStore.Entry> cleared = new List<LostReferenceStore.Entry>();
 
         private Vector2 scroll;
 
@@ -44,9 +54,45 @@ namespace PaperFly.RenderKit.Acceptance
                 : $"не принята, принята версия {result.Accepted.version}";
         }
 
+        private static void DrawLines(
+            string title,
+            IReadOnlyCollection<string> lines)
+        {
+            if (lines.Count == 0)
+            {
+                return;
+            }
+
+            EditorGUILayout.LabelField(
+                title,
+                EditorStyles.miniBoldLabel);
+
+            using (new EditorGUI.IndentLevelScope())
+            {
+                foreach (var line in lines)
+                {
+                    EditorGUILayout.LabelField(
+                        line,
+                        EditorStyles.wordWrappedMiniLabel);
+                }
+            }
+        }
+
         private void Refresh()
         {
             this.results = AcceptanceChecks.Run();
+
+            var targets = new LocationLostTargets(this.results);
+
+            this.plans =
+                this.results
+                    .SelectMany(result => LostOverrideCleaner.Plan(
+                        result.LostLinkFiles,
+                        targets,
+                        result.Location.Name))
+                    .ToList();
+
+            this.cleared = LostReferenceStore.Refresh();
 
             if (this.results.Any(result => result.Issues.Count > 0))
             {
@@ -167,14 +213,20 @@ namespace PaperFly.RenderKit.Acceptance
                     MessageType.Error);
             }
 
-            var lostFiles = result.LostLinkFiles;
+            var locationPlans =
+                this.plans
+                    .Where(plan => string.Equals(
+                        plan.PackageName,
+                        location.Name,
+                        StringComparison.Ordinal))
+                    .ToList();
 
-            if (lostFiles.Count > 0
-             && GUILayout.Button($"Сохранить потерянные правки ({lostFiles.Count} файл.)"))
+            if (locationPlans.Count > 0)
             {
-                // Меняет файлы и может открывать сцены, поэтому выполняется вне отрисовки окна.
-                EditorApplication.delayCall += () => this.CleanLostOverrides(lostFiles);
+                this.DrawPlans(locationPlans);
             }
+
+            this.DrawCleared(location.Name);
 
             var holderFiles = result.HolderFiles;
 
@@ -193,40 +245,147 @@ namespace PaperFly.RenderKit.Acceptance
             }
         }
 
-        private void CleanLostOverrides(List<string> files)
+        // По каждому пропавшему объекту и каждой ссылке разработчик сам выбирает, что сделать, прямо в окне.
+        private void DrawPlans(List<LostPlan> locationPlans)
+        {
+            EditorGUILayout.Space();
+
+            EditorGUILayout.LabelField(
+                "Потерянные правки: объектов из основы больше нет. Выберите, что сделать, и нажмите «Применить».",
+                EditorStyles.wordWrappedLabel);
+
+            foreach (var plan in locationPlans)
+            {
+                using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+                {
+                    EditorGUILayout.LabelField(
+                        plan.File,
+                        EditorStyles.boldLabel);
+
+                    foreach (var holder in plan.Holders)
+                    {
+                        using (new EditorGUILayout.HorizontalScope())
+                        {
+                            EditorGUILayout.LabelField(
+                                $"Добавлено игрой: «{holder.Name}»",
+                                EditorStyles.wordWrappedLabel);
+
+                            holder.Keep =
+                                EditorGUILayout.Popup(
+                                    holder.Keep
+                                        ? 0
+                                        : 1,
+                                    HolderOptions,
+                                    GUILayout.Width(ChoiceWidth))
+                             == 0;
+                        }
+
+                        DrawLines(
+                            string.Empty,
+                            holder.Items);
+                    }
+
+                    foreach (var reference in plan.References)
+                    {
+                        using (new EditorGUILayout.HorizontalScope())
+                        {
+                            EditorGUILayout.LabelField(
+                                $"Ссылка станет пустой: {reference.Reference.Description}",
+                                EditorStyles.wordWrappedLabel);
+
+                            reference.Track =
+                                EditorGUILayout.Popup(
+                                    reference.Track
+                                        ? 0
+                                        : 1,
+                                    ReferenceOptions,
+                                    GUILayout.Width(ChoiceWidth))
+                             == 0;
+                        }
+                    }
+
+                    DrawLines(
+                        "Изменённые поля: перенести некуда, попадут в отчёт",
+                        plan.Lost);
+
+                    DrawLines(
+                        "Объекты пересозданы: правки перейдут на них сами",
+                        plan.Recreated);
+                }
+            }
+
+            if (GUILayout.Button("Применить"))
+            {
+                // Меняет файлы и может открывать сцены, поэтому выполняется вне отрисовки окна.
+                EditorApplication.delayCall += () => this.ApplyPlans(locationPlans);
+            }
+        }
+
+        private void DrawCleared(string packageName)
+        {
+            var entries =
+                this.cleared
+                    .Where(entry => string.Equals(
+                        entry.PackageName,
+                        packageName,
+                        StringComparison.Ordinal))
+                    .ToList();
+
+            if (entries.Count == 0)
+            {
+                return;
+            }
+
+            EditorGUILayout.Space();
+
+            EditorGUILayout.LabelField(
+                "Пустые ссылки: назначьте их заново или пропустите. Пока они есть, версию не принять.",
+                EditorStyles.wordWrappedLabel);
+
+            foreach (var entry in entries)
+            {
+                using (new EditorGUILayout.HorizontalScope(EditorStyles.helpBox))
+                {
+                    EditorGUILayout.LabelField(
+                        $"{entry.FilePath}: {entry.Description}",
+                        EditorStyles.wordWrappedLabel);
+
+                    if (GUILayout.Button(
+                        "Открыть",
+                        GUILayout.Width(SmallButtonWidth)))
+                    {
+                        var asset = AssetDatabase.LoadMainAssetAtPath(entry.FilePath);
+
+                        Selection.activeObject = asset;
+                        EditorGUIUtility.PingObject(asset);
+                    }
+
+                    if (GUILayout.Button(
+                        "Пропустить",
+                        GUILayout.Width(SmallButtonWidth)))
+                    {
+                        LostReferenceStore.Skip(entry);
+
+                        EditorApplication.delayCall += this.Refresh;
+                    }
+                }
+            }
+        }
+
+        private void ApplyPlans(List<LostPlan> locationPlans)
         {
             var targets = new LocationLostTargets(this.results);
 
             var report =
                 LostOverrideCleaner.Describe(
-                    files,
+                    locationPlans.Select(plan => plan.File),
                     targets);
 
-            var shown = report.Take(DialogReportLines);
-
-            var more =
-                report.Count > DialogReportLines
-                    ? $"\n… и ещё {report.Count - DialogReportLines} строк: полный список будет в консоли и в файле отчёта."
-                    : string.Empty;
-
-            var message =
-                "Эти правки и ссылки указывают на объекты, которых нет в новой версии локации (удалены или переименованы):\n\n"
-              + string.Join("\n", shown)
-              + more
-              + "\n\nДобавленные компоненты и дочерние объекты будут перенесены в «"
-              + LostOverrideRescue.HolderPrefix
-              + " …» под корнем локации. Изменённые поля и ссылки на удалённые объекты сохранятся только в отчёте: перенесите их вручную. Изменения можно откатить через git.";
-
-            var confirmed =
-                EditorUtility.DisplayDialog(
-                    "Сохранить потерянные правки",
-                    message,
-                    "Сохранить",
-                    "Отмена");
-
-            if (!confirmed)
+            foreach (var plan in locationPlans)
             {
-                return;
+                report.Add($"{plan.File}: решения");
+                report.AddRange(plan.Holders.Select(holder => $"    «{holder.Name}» → {(holder.Keep ? "сохранить" : "удалить")}"));
+                report.AddRange(plan.References.Select(reference => $"    {reference.Reference.Description} → {(reference.Track ? "напоминать" : "очистить")}"));
             }
 
             var reportPath = LostOverrideCleaner.SaveReport(report);
@@ -235,18 +394,18 @@ namespace PaperFly.RenderKit.Acceptance
 
             var skipped = new List<string>();
 
-            var cleaned =
-                LostOverrideCleaner.Clean(
-                    files,
+            var changed =
+                LostOverrideCleaner.Apply(
+                    locationPlans,
                     targets,
                     this.results
                         .Select(result => result.Location.AssetFolder)
                         .ToList(),
                     skipped);
 
-            foreach (var file in cleaned)
+            foreach (var file in changed)
             {
-                Debug.Log($"[Приём локаций] Потерянные правки сохранены: {file}");
+                Debug.Log($"[Приём локаций] Потерянные правки разобраны: {file}");
             }
 
             this.ReportSkipped(skipped);

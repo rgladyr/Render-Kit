@@ -8,6 +8,8 @@ using PaperFly.RenderKit.Acceptance.Rescue;
 using PaperFly.RenderKit.Release;
 using PaperFly.RenderKit.Validation;
 
+using UnityEngine;
+
 using PackageInfo = UnityEditor.PackageManager.PackageInfo;
 
 namespace PaperFly.RenderKit.Acceptance
@@ -41,6 +43,11 @@ namespace PaperFly.RenderKit.Acceptance
         /// </summary>
         public const string HolderRule = "Потерянное";
 
+        /// <summary>
+        /// Правило очищенных ссылок: ошибка держится, пока разработчик не назначит ссылку заново или не пропустит её.
+        /// </summary>
+        public const string ClearedReferenceRule = "Потерянная ссылка";
+
         // Ссылка на префаб или модель целиком (m_SourcePrefab). Такого объекта нет среди содержимого файла, но он есть всегда.
         private const long PrefabAssetFileId = 100100000;
 
@@ -54,7 +61,7 @@ namespace PaperFly.RenderKit.Acceptance
 
         private static readonly string[] HolderFileExtensions = { ".prefab", ".unity" };
 
-        private static readonly string[] Rules = { DeliveryRule, RenderKitRule, LostLinkRule, LostReferenceRule, GuidConflictRule, HolderRule };
+        private static readonly string[] Rules = { DeliveryRule, RenderKitRule, LostLinkRule, LostReferenceRule, GuidConflictRule, HolderRule, ClearedReferenceRule };
 
         private static bool CanHoldLost(string path)
             => HolderFileExtensions.Any(extension => path.EndsWith(
@@ -114,6 +121,35 @@ namespace PaperFly.RenderKit.Acceptance
             }
         }
 
+        // Ошибка держится, пока ссылку не назначат заново или не пропустят в окне приёма: иначе пустое поле
+        // осталось бы незамеченным. Пишется и в консоль, как напоминание.
+        private static void CheckClearedReferences(IReadOnlyCollection<AcceptanceResult> results)
+        {
+            foreach (var entry in LostReferenceStore.Refresh())
+            {
+                var result =
+                    results.FirstOrDefault(candidate => string.Equals(
+                        candidate.Location.Name,
+                        entry.PackageName,
+                        StringComparison.Ordinal))
+                 ?? results.FirstOrDefault();
+
+                var message = $"Пустая ссылка после потерянных правок: {entry.Description}. Назначьте её заново или пропустите в окне приёма.";
+
+                Debug.LogError($"[Приём локаций] {entry.FilePath}: {message}");
+
+                if (result != null)
+                {
+                    AddIssue(
+                        result,
+                        ValidationSeverity.Error,
+                        entry.FilePath,
+                        ClearedReferenceRule,
+                        message);
+                }
+            }
+        }
+
         // Пока у файла игры и файла пакета один GUID, Unity видит только один из них, и неизвестно, какой попадёт в сборку.
         private static void CheckGuidConflicts(
             AcceptanceResult result,
@@ -157,6 +193,48 @@ namespace PaperFly.RenderKit.Acceptance
 
             result.Issues.Add(issue);
             ValidationReport.Add(issue);
+        }
+
+        // Манифест остаётся в репозитории и после выпуска, поэтому выпуск отличает только тег на коммите.
+        // Коммит без тега — проверочная версия: в нём манифест может быть от прошлого выпуска, и сверка с ним
+        // дала бы ложные ошибки, поэтому остальные проверки для него не выполняются.
+        private static bool CheckTag(AcceptanceResult result)
+        {
+            var version = result.Location.Manifest.version;
+
+            var isTagged =
+                ReleaseTagCheck.Check(
+                    result.Location,
+                    version,
+                    out var error);
+
+            if (isTagged == null)
+            {
+                AddIssue(
+                    result,
+                    ValidationSeverity.Warning,
+                    result.Location.AssetFolder,
+                    DeliveryRule,
+                    $"Не удалось проверить на GitHub, что на подключённом коммите стоит тег {version}: {error}. Принять можно, но убедитесь, что это выпуск, а не коммит локации.");
+
+                return false;
+            }
+
+            if (isTagged.Value)
+            {
+                return false;
+            }
+
+            result.IsUntagged = true;
+
+            AddIssue(
+                result,
+                ValidationSeverity.Warning,
+                result.Location.AssetFolder,
+                DeliveryRule,
+                $"Проверочная версия: на подключённом коммите нет тега {version}, значит это не выпуск, а коммит локации. Смотреть можно, принять и закоммитить нельзя.");
+
+            return true;
         }
 
         private static void CheckVersions(AcceptanceResult result)
@@ -414,22 +492,22 @@ namespace PaperFly.RenderKit.Acceptance
             {
                 var item = group.First();
 
-                var renamed =
-                    item.RenamedPath == null
-                        ? string.Empty
-                        : $" (вероятно, переименован в {item.RenamedPath})";
-
                 var target =
                     targets.Describe(
                         item.Target.Guid,
                         item.Target.FileId);
+
+                var message =
+                    item.IsRecreated
+                        ? $"Правки на {target}: в версии {version} объект пересоздан с тем же именем, правок — {group.Count()}. Разберите потерянные правки в окне приёма: эти правки перейдут на новый объект сами."
+                        : $"Правки на {target}: этого объекта нет в версии {version}, правок — {group.Count()}. Разберите потерянные правки в окне приёма.";
 
                 AddIssue(
                     result,
                     ValidationSeverity.Error,
                     path,
                     LostLinkRule,
-                    $"Правки на {target}{renamed}: этого объекта нет в версии {version}, правок — {group.Count()}. Нажмите «Сохранить потерянные правки» в окне приёма: добавленные компоненты и дочерние объекты перейдут в «{LostOverrideRescue.HolderPrefix} …», изменённые поля попадут в отчёт.");
+                    message);
             }
 
             var lostReferences =
@@ -444,7 +522,7 @@ namespace PaperFly.RenderKit.Acceptance
                     ValidationSeverity.Error,
                     path,
                     LostReferenceRule,
-                    $"Ссылка станет пустой: {reference}. Этого объекта нет в версии {version}. Нажмите «Сохранить потерянные правки»: ссылка попадёт в отчёт, затем назначьте её заново.");
+                    $"Ссылка станет пустой: {reference.Description}. Этого объекта нет в версии {version}. Разберите потерянные правки в окне приёма.");
             }
         }
 
@@ -467,6 +545,11 @@ namespace PaperFly.RenderKit.Acceptance
             {
                 result.Changes.AddRange(
                     ManifestComparer.DescribeObjectChanges(
+                        result.Accepted,
+                        result.Location.Manifest));
+
+                result.Changes.AddRange(
+                    ManifestComparer.DescribeRecreated(
                         result.Accepted,
                         result.Location.Manifest));
             }
@@ -531,6 +614,11 @@ namespace PaperFly.RenderKit.Acceptance
                     continue;
                 }
 
+                if (CheckTag(result))
+                {
+                    continue;
+                }
+
                 CheckVersions(result);
                 CheckDelivery(result);
 
@@ -542,6 +630,7 @@ namespace PaperFly.RenderKit.Acceptance
             }
 
             CheckHolders(results);
+            CheckClearedReferences(results);
 
             return results;
         }

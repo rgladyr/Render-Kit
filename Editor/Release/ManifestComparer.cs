@@ -9,19 +9,56 @@ namespace PaperFly.RenderKit.Release
     /// </summary>
     internal static class ManifestComparer
     {
-        private static string GetParentPath(ReleaseManifest.ObjectEntry entry)
+        // Файл, путь и тип: у пересозданного объекта они те же, меняется только идентификатор.
+        private static string GetIdentityKey(ReleaseManifest.ObjectEntry entry)
+            => $"{entry.guid}|{entry.path}|{entry.type}";
+
+        // Вложенные в удалённый объект удалены вместе с ним, поэтому перечисляются числом.
+        private static List<string> DescribeTopmost(
+            IReadOnlyCollection<ReleaseManifest.ObjectEntry> entries,
+            string verb)
         {
-            var separator = entry.path.LastIndexOf('/');
+            var changes = new List<string>();
 
-            return separator < 0
-                ? string.Empty
-                : entry.path.Substring(
-                    0,
-                    separator);
+            foreach (var entry in entries)
+            {
+                var hasParentInList =
+                    entries.Any(other => !ReferenceEquals(
+                                             other,
+                                             entry)
+                                      && string.Equals(
+                                             other.guid,
+                                             entry.guid,
+                                             StringComparison.Ordinal)
+                                      && entry.path.StartsWith(
+                                             other.path + "/",
+                                             StringComparison.Ordinal));
+
+                if (hasParentInList)
+                {
+                    continue;
+                }
+
+                var nested =
+                    entries.Count(other => !ReferenceEquals(
+                                               other,
+                                               entry)
+                                        && string.Equals(
+                                               other.guid,
+                                               entry.guid,
+                                               StringComparison.Ordinal)
+                                        && IsInSubtree(
+                                               other.path,
+                                               entry.path));
+
+                changes.Add(
+                    nested == 0
+                        ? $"{verb}: {Describe(entry)}"
+                        : $"{verb}: {Describe(entry)} и {nested} вложенных");
+            }
+
+            return changes;
         }
-
-        private static string GetGroupKey(ReleaseManifest.ObjectEntry entry)
-            => $"{entry.guid}|{GetParentPath(entry)}";
 
         private static bool IsInSubtree(
             string path,
@@ -91,160 +128,112 @@ namespace PaperFly.RenderKit.Release
                 : $"{entry.asset} → {entry.path} ({entry.type})";
 
         /// <summary>
-        /// Находит объекты, которые удалены или, вероятно, переименованы с прошлого выпуска.
+        /// Описывает удалённые объекты основы и моделей: только верхние, вложенные сворачиваются в число.
         /// </summary>
         /// <param name="previous">Манифест прошлого выпуска.</param>
         /// <param name="current">Манифест текущего состояния.</param>
-        /// <returns>Описания изменений; пустой список, если связи с правками в игре не пострадают.</returns>
+        /// <returns>Описания удалений; пустой список, если связи с правками в игре не пострадают.</returns>
         /// <remarks>
-        /// Для Unity переименование в Blender — это удаление и создание объекта с новым идентификатором.
-        /// Если под одним родителем пропал ровно один объект и появился ровно один, это считается переименованием.
-        /// Компоненты пропадают вместе со своим объектом, поэтому сравниваются только объекты.
+        /// Переименование в Blender для Unity — удаление и создание объекта, поэтому оно тоже попадает сюда.
+        /// Угадывать новое имя не нужно: при нескольких удалениях догадка может ошибиться.
+        /// Пересозданные объекты (тот же путь и тип) сюда не попадают: правки игры переносятся на них сами.
         /// </remarks>
         public static List<string> DescribeObjectChanges(
             ReleaseManifest previous,
             ReleaseManifest current)
         {
-            var renames =
-                FindRenames(
+            var recreated =
+                FindRecreatedObjects(
                     previous,
                     current);
-
-            var renamedKeys =
-                new HashSet<string>(
-                    renames.Select(rename => GetKey(rename.Old)),
-                    StringComparer.Ordinal);
-
-            var changes =
-                renames
-                    .Select(rename => $"Переименован: {Describe(rename.Old)} → {rename.New.path}")
-                    .ToList();
 
             var removed =
                 Except(
                         GetGameObjects(previous),
                         GetGameObjects(current))
-                    .Where(entry => !renamedKeys.Contains(GetKey(entry)));
+                    .Where(entry => !recreated.ContainsKey(GetKey(entry)))
+                    .ToList();
 
-            changes.AddRange(removed.Select(entry => $"Удалён: {Describe(entry)}"));
-
-            return changes;
+            return DescribeTopmost(
+                removed,
+                "Удалён");
         }
 
         /// <summary>
-        /// Находит объекты, которые, вероятно, переименованы: под одним родителем пропал ровно один объект и появился ровно один.
+        /// Описывает пересозданные объекты: у них новый идентификатор, но тот же путь и тип.
         /// </summary>
         /// <param name="previous">Манифест прошлого выпуска.</param>
         /// <param name="current">Манифест текущего состояния.</param>
-        /// <returns>Пары «старый объект — новый объект», только GameObject.</returns>
-        public static List<(ReleaseManifest.ObjectEntry Old, ReleaseManifest.ObjectEntry New)> FindRenames(
+        /// <returns>Описания; вложенные объекты сворачиваются в число.</returns>
+        public static List<string> DescribeRecreated(
             ReleaseManifest previous,
             ReleaseManifest current)
         {
-            var previousObjects = GetGameObjects(previous);
-            var currentObjects = GetGameObjects(current);
+            var recreatedKeys =
+                new HashSet<string>(
+                    FindRecreatedObjects(
+                            previous,
+                            current)
+                        .Keys,
+                    StringComparer.Ordinal);
 
-            var addedByGroup =
-                Except(
-                        currentObjects,
-                        previousObjects)
-                    .ToLookup(
-                        GetGroupKey,
-                        StringComparer.Ordinal);
+            var recreated =
+                GetGameObjects(previous)
+                    .Where(entry => recreatedKeys.Contains(GetKey(entry)))
+                    .ToList();
 
-            var removedByGroup =
-                Except(
-                        previousObjects,
-                        currentObjects)
-                    .GroupBy(
-                        GetGroupKey,
-                        StringComparer.Ordinal);
-
-            var renames = new List<(ReleaseManifest.ObjectEntry Old, ReleaseManifest.ObjectEntry New)>();
-
-            foreach (var group in removedByGroup)
-            {
-                var addedInGroup = addedByGroup[group.Key].ToList();
-
-                if (group.Count() == 1
-                 && addedInGroup.Count == 1)
-                {
-                    renames.Add((group.First(), addedInGroup[0]));
-                }
-            }
-
-            return renames;
+            return DescribeTopmost(
+                    recreated,
+                    "Пересоздан")
+                .Select(change => change + " — правки игры перенесутся сами")
+                .ToList();
         }
 
         /// <summary>
-        /// Сопоставляет каждый пропавший объект переименованного поддерева с новым: сам объект, потомков и компоненты.
+        /// Сопоставляет пропавшие объекты с новыми, у которых тот же файл, путь в иерархии и тип.
         /// </summary>
         /// <param name="previous">Манифест прошлого выпуска.</param>
         /// <param name="current">Манифест текущего состояния.</param>
         /// <returns>Ключ старого объекта → новый объект.</returns>
         /// <remarks>
-        /// При переименовании в Blender новый идентификатор получают и потомки, потому что он строится из пути.
-        /// Объект ищется по тому же пути с новым именем и тому же типу; одинаковые компоненты одного объекта — по порядку.
+        /// Так бывает, когда префаб основы или объект удалили и создали заново с теми же именами: это тот же объект.
+        /// Если одинаковых путей несколько (соседи с одним именем), они сопоставляются только при равном числе, по порядку.
         /// </remarks>
-        public static Dictionary<string, ReleaseManifest.ObjectEntry> FindRenamedObjects(
+        public static Dictionary<string, ReleaseManifest.ObjectEntry> FindRecreatedObjects(
             ReleaseManifest previous,
             ReleaseManifest current)
         {
             var map = new Dictionary<string, ReleaseManifest.ObjectEntry>(StringComparer.Ordinal);
 
-            var currentKeys =
-                new HashSet<string>(
-                    current.objects.Select(GetKey),
-                    StringComparer.Ordinal);
+            var added =
+                Except(
+                        current.objects,
+                        previous.objects)
+                    .ToLookup(
+                        GetIdentityKey,
+                        StringComparer.Ordinal);
 
-            var renames =
-                FindRenames(
-                    previous,
-                    current);
+            var removed =
+                Except(
+                        previous.objects,
+                        current.objects)
+                    .GroupBy(
+                        GetIdentityKey,
+                        StringComparer.Ordinal);
 
-            foreach (var (oldRoot, newRoot) in renames)
+            foreach (var group in removed)
             {
-                var candidates =
-                    current.objects
-                        .Where(entry => string.Equals(
-                            entry.guid,
-                            newRoot.guid,
-                            StringComparison.Ordinal))
-                        .ToLookup(
-                            entry => $"{entry.path}|{entry.type}",
-                            StringComparer.Ordinal);
+                var candidates = added[group.Key].ToList();
+                var lost = group.ToList();
 
-                var lostEntries =
-                    previous.objects
-                        .Where(entry => string.Equals(
-                            entry.guid,
-                            oldRoot.guid,
-                            StringComparison.Ordinal))
-                        .Where(entry => IsInSubtree(
-                            entry.path,
-                            oldRoot.path))
-                        .Where(entry => !currentKeys.Contains(GetKey(entry)))
-                        .GroupBy(
-                            entry => $"{entry.path}|{entry.type}",
-                            StringComparer.Ordinal);
-
-                foreach (var group in lostEntries)
+                if (candidates.Count != lost.Count)
                 {
-                    var first = group.First();
+                    continue;
+                }
 
-                    var newPath =
-                        newRoot.path
-                      + first.path.Substring(oldRoot.path.Length);
-
-                    var matches = candidates[$"{newPath}|{first.type}"].ToList();
-
-                    foreach (var (entry, index) in group.Select((entry, index) => (entry, index)))
-                    {
-                        if (index < matches.Count)
-                        {
-                            map[GetKey(entry)] = matches[index];
-                        }
-                    }
+                for (var index = 0; index < lost.Count; index++)
+                {
+                    map[GetKey(lost[index])] = candidates[index];
                 }
             }
 

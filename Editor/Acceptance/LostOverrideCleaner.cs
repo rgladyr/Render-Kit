@@ -145,7 +145,9 @@ namespace PaperFly.RenderKit.Acceptance
             return true;
         }
 
-        private static int DestroyHolders(IEnumerable<GameObject> roots)
+        private static int DestroyHolders(
+            IEnumerable<GameObject> roots,
+            Func<string, bool> isSelected)
         {
             var holders =
                 roots
@@ -153,6 +155,7 @@ namespace PaperFly.RenderKit.Acceptance
                     .Where(transform => transform.name.StartsWith(
                         LostOverrideRescue.HolderPrefix,
                         StringComparison.Ordinal))
+                    .Where(transform => isSelected(transform.name))
                     .Select(transform => transform.gameObject)
                     .ToList();
 
@@ -167,6 +170,7 @@ namespace PaperFly.RenderKit.Acceptance
 
         private static bool RemoveHoldersFromPrefab(
             string path,
+            Func<string, bool> isSelected,
             ICollection<string> skipped)
         {
             if (!TryCloseStage(
@@ -180,7 +184,12 @@ namespace PaperFly.RenderKit.Acceptance
 
             try
             {
-                if (DestroyHolders(new[] { root }) == 0)
+                var destroyed =
+                    DestroyHolders(
+                        new[] { root },
+                        isSelected);
+
+                if (destroyed == 0)
                 {
                     return false;
                 }
@@ -199,6 +208,7 @@ namespace PaperFly.RenderKit.Acceptance
 
         private static bool RemoveHoldersFromScene(
             string path,
+            Func<string, bool> isSelected,
             ICollection<string> skipped)
         {
             var scene = SceneManager.GetSceneByPath(path);
@@ -222,7 +232,12 @@ namespace PaperFly.RenderKit.Acceptance
 
             try
             {
-                if (DestroyHolders(scene.GetRootGameObjects()) == 0)
+                var destroyed =
+                    DestroyHolders(
+                        scene.GetRootGameObjects(),
+                        isSelected);
+
+                if (destroyed == 0)
                 {
                     return false;
                 }
@@ -456,66 +471,6 @@ namespace PaperFly.RenderKit.Acceptance
         }
 
         /// <summary>
-        /// Переносит добавленное в объекты «_Потерянное …» и убирает потерянные правки из указанных файлов игры.
-        /// </summary>
-        /// <param name="files">Файлы игры, в которых проверка приёма нашла потерянные правки.</param>
-        /// <param name="targets">Сведения об объектах подключённых версий локаций.</param>
-        /// <param name="locationFolders">Папки пакетов локаций для AssetDatabase: Packages/имя.</param>
-        /// <param name="skipped">Сюда добавляются файлы, которые не удалось обработать, с причиной.</param>
-        /// <returns>Файлы, в которых правки убраны и которые сохранены.</returns>
-        public static List<string> Clean(
-            IEnumerable<string> files,
-            ILostTargets targets,
-            IReadOnlyCollection<string> locationFolders,
-            ICollection<string> skipped)
-        {
-            var cleaned = new List<string>();
-
-            foreach (var file in files.Distinct(StringComparer.OrdinalIgnoreCase))
-            {
-                string result;
-
-                if (file.EndsWith(
-                        PrefabExtension,
-                        StringComparison.OrdinalIgnoreCase))
-                {
-                    result =
-                        CleanPrefab(
-                            file,
-                            targets,
-                            locationFolders,
-                            skipped);
-                }
-                else if (file.EndsWith(
-                             SceneExtension,
-                             StringComparison.OrdinalIgnoreCase))
-                {
-                    result =
-                        CleanScene(
-                            file,
-                            targets,
-                            locationFolders,
-                            skipped);
-                }
-                else
-                {
-                    skipped.Add($"{file}: файлы этого типа очищаются только вручную.");
-
-                    continue;
-                }
-
-                if (result != null)
-                {
-                    cleaned.Add(result);
-                }
-            }
-
-            AssetDatabase.SaveAssets();
-
-            return cleaned;
-        }
-
-        /// <summary>
         /// Удаляет объекты «_Потерянное …» вместе со всем, что в них перенесено.
         /// </summary>
         /// <param name="files">Сцены и префабы игры с такими объектами.</param>
@@ -530,15 +485,10 @@ namespace PaperFly.RenderKit.Acceptance
             foreach (var file in files.Distinct(StringComparer.OrdinalIgnoreCase))
             {
                 var isChanged =
-                    file.EndsWith(
-                        PrefabExtension,
-                        StringComparison.OrdinalIgnoreCase)
-                        ? RemoveHoldersFromPrefab(
-                            file,
-                            skipped)
-                        : RemoveHoldersFromScene(
-                            file,
-                            skipped);
+                    RemoveHolders(
+                        file,
+                        _ => true,
+                        skipped);
 
                 if (isChanged)
                 {
@@ -549,6 +499,169 @@ namespace PaperFly.RenderKit.Acceptance
             AssetDatabase.SaveAssets();
 
             return changed;
+        }
+
+        /// <summary>
+        /// Удаляет из файла выбранные объекты «_Потерянное …».
+        /// </summary>
+        /// <param name="file">Сцена или префаб игры.</param>
+        /// <param name="isSelected">Отбор по имени объекта.</param>
+        /// <param name="skipped">Сюда добавляется причина, если файл не удалось обработать.</param>
+        /// <returns><c>true</c>, если файл изменён.</returns>
+        public static bool RemoveHolders(
+            string file,
+            Func<string, bool> isSelected,
+            ICollection<string> skipped)
+            => file.EndsWith(
+                   PrefabExtension,
+                   StringComparison.OrdinalIgnoreCase)
+                ? RemoveHoldersFromPrefab(
+                    file,
+                    isSelected,
+                    skipped)
+                : RemoveHoldersFromScene(
+                    file,
+                    isSelected,
+                    skipped);
+
+        /// <summary>
+        /// Собирает потерянные правки файлов для окна приёма: по каждой разработчик выбирает, что сделать.
+        /// </summary>
+        /// <param name="files">Файлы игры с потерянными правками.</param>
+        /// <param name="targets">Сведения об объектах подключённых версий локаций.</param>
+        /// <param name="packageName">Пакет локации.</param>
+        /// <returns>По плану на файл; файлы, где разбирать нечего, пропускаются.</returns>
+        public static List<LostPlan> Plan(
+            IEnumerable<string> files,
+            ILostTargets targets,
+            string packageName)
+        {
+            var plans = new List<LostPlan>();
+
+            foreach (var file in files.Distinct(StringComparer.OrdinalIgnoreCase).Where(IsSupported))
+            {
+                var parsed = UnityYamlFile.Parse(File.ReadAllText(file));
+
+                var plan =
+                    new LostPlan(
+                        file,
+                        packageName);
+
+                var items =
+                    LostOverrideRescue.Find(
+                        parsed,
+                        targets);
+
+                foreach (var group in items.Where(item => item.HolderName != null).GroupBy(item => item.HolderName))
+                {
+                    var choice = new LostPlan.HolderChoice(group.Key);
+
+                    choice.Items.AddRange(group.Select(item => item.Description));
+                    plan.Holders.Add(choice);
+                }
+
+                plan.Recreated.AddRange(
+                    items
+                        .Where(item => item.IsRecreated)
+                        .Select(item => item.Description));
+
+                plan.Lost.AddRange(
+                    items
+                        .Where(item => item.HolderName == null)
+                        .Where(item => !item.IsRecreated)
+                        .Select(item => item.Description));
+
+                var references =
+                    LostReferenceFinder.Find(
+                        parsed,
+                        targets);
+
+                plan.References.AddRange(references.Select(reference => new LostPlan.ReferenceChoice(reference)));
+
+                if (!plan.IsEmpty)
+                {
+                    plans.Add(plan);
+                }
+            }
+
+            return plans;
+        }
+
+        /// <summary>
+        /// Выполняет решения разработчика: переносит добавленное, удаляет ненужное, запоминает очищенные ссылки.
+        /// </summary>
+        /// <param name="plans">Планы из <see cref="Plan"/> с выбранными действиями.</param>
+        /// <param name="targets">Сведения об объектах подключённых версий локаций.</param>
+        /// <param name="locationFolders">Папки пакетов локаций для AssetDatabase: Packages/имя.</param>
+        /// <param name="skipped">Сюда добавляются файлы, которые не удалось обработать, с причиной.</param>
+        /// <returns>Изменённые файлы.</returns>
+        /// <remarks>
+        /// Сначала всё добавленное переносится в «_Потерянное …»: так Unity не теряет его при очистке правок.
+        /// Затем объекты, которые разработчик решил удалить, удаляются целиком вместе с дочерними.
+        /// </remarks>
+        public static List<string> Apply(
+            IReadOnlyCollection<LostPlan> plans,
+            ILostTargets targets,
+            IReadOnlyCollection<string> locationFolders,
+            ICollection<string> skipped)
+        {
+            var cleaned = new List<string>();
+
+            foreach (var plan in plans)
+            {
+                var skippedBefore = skipped.Count;
+
+                var result =
+                    plan.File.EndsWith(
+                        PrefabExtension,
+                        StringComparison.OrdinalIgnoreCase)
+                        ? CleanPrefab(
+                            plan.File,
+                            targets,
+                            locationFolders,
+                            skipped)
+                        : CleanScene(
+                            plan.File,
+                            targets,
+                            locationFolders,
+                            skipped);
+
+                if (skipped.Count > skippedBefore)
+                {
+                    continue;
+                }
+
+                var removed =
+                    new HashSet<string>(
+                        plan.Holders
+                            .Where(holder => !holder.Keep)
+                            .Select(holder => holder.Name),
+                        StringComparer.Ordinal);
+
+                var isRemoved =
+                    removed.Count > 0
+                 && RemoveHolders(
+                        plan.File,
+                        removed.Contains,
+                        skipped);
+
+                LostReferenceStore.Add(
+                    plan.File,
+                    plan.PackageName,
+                    plan.References
+                        .Where(reference => reference.Track)
+                        .Select(reference => reference.Reference));
+
+                if (result != null
+                 || isRemoved)
+                {
+                    cleaned.Add(plan.File);
+                }
+            }
+
+            AssetDatabase.SaveAssets();
+
+            return cleaned;
         }
     }
 }

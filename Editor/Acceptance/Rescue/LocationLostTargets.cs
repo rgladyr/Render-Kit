@@ -26,7 +26,7 @@ namespace PaperFly.RenderKit.Acceptance.Rescue
 
         private readonly Dictionary<string, long> rootTransforms = new Dictionary<string, long>(StringComparer.Ordinal);
 
-        private readonly Dictionary<string, ReleaseManifest.ObjectEntry> renamedObjects =
+        private readonly Dictionary<string, ReleaseManifest.ObjectEntry> recreatedObjects =
             new Dictionary<string, ReleaseManifest.ObjectEntry>(StringComparer.Ordinal);
 
         /// <summary>
@@ -70,20 +70,20 @@ namespace PaperFly.RenderKit.Acceptance.Rescue
                 this.previousObjects[ManifestComparer.GetKey(entry)] = entry;
             }
 
-            // Без описаний объектов в принятой версии переименование не распознать.
+            // Без описаний объектов в принятой версии пересоздание не распознать.
             if (result.Accepted?.format != ReleaseManifest.CurrentFormat)
             {
                 return;
             }
 
-            var renamed =
-                ManifestComparer.FindRenamedObjects(
+            var recreated =
+                ManifestComparer.FindRecreatedObjects(
                     result.Accepted,
                     manifest);
 
-            foreach (var pair in renamed)
+            foreach (var pair in recreated)
             {
-                this.renamedObjects[pair.Key] = pair.Value;
+                this.recreatedObjects[pair.Key] = pair.Value;
             }
         }
 
@@ -144,22 +144,22 @@ namespace PaperFly.RenderKit.Acceptance.Rescue
         }
 
         /// <inheritdoc/>
-        public bool TryGetRenamed(
+        public bool TryGetRecreated(
             string guid,
             long fileId,
-            out string renamedPath)
+            out long recreatedFileId)
         {
             var found =
-                this.renamedObjects.TryGetValue(
+                this.recreatedObjects.TryGetValue(
                     ManifestComparer.GetKey(
                         guid,
                         fileId),
                     out var entry);
 
-            renamedPath =
+            recreatedFileId =
                 found
-                    ? entry.path
-                    : null;
+                    ? entry.fileId
+                    : 0;
 
             return found;
         }

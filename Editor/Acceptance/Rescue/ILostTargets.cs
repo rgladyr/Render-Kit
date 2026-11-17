@@ -36,16 +36,16 @@ namespace PaperFly.RenderKit.Acceptance.Rescue
             long fileId);
 
         /// <summary>
-        /// Находит объект, в который, вероятно, переименован потерянный: подсказка разработчику, куда перенести правки.
+        /// Находит пересозданный объект: тот же файл, путь в иерархии и тип, но новый идентификатор.
         /// </summary>
         /// <param name="guid">GUID файла основы.</param>
         /// <param name="fileId">Идентификатор потерянного объекта.</param>
-        /// <param name="renamedPath">Путь нового объекта в иерархии.</param>
-        /// <returns><c>false</c>, если похожего нового объекта нет.</returns>
-        bool TryGetRenamed(
+        /// <param name="recreatedFileId">Идентификатор нового объекта в том же файле.</param>
+        /// <returns><c>false</c>, если объект удалён или переименован.</returns>
+        bool TryGetRecreated(
             string guid,
             long fileId,
-            out string renamedPath);
+            out long recreatedFileId);
 
         /// <summary>
         /// Корневой Transform основы, к которому вешается объект «_Потерянное …».

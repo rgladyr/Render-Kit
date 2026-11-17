@@ -210,16 +210,17 @@ namespace PaperFly.RenderKit.Acceptance.Rescue
             LostItem item,
             ILostTargets targets)
         {
-            var renamed =
-                item.RenamedPath == null
-                    ? string.Empty
-                    : $" (вероятно, переименован в {item.RenamedPath})";
-
             var target =
                 targets.Describe(
                     item.Target.Guid,
-                    item.Target.FileId)
-              + renamed;
+                    item.Target.FileId);
+
+            if (item.IsRecreated)
+            {
+                item.Description = $"{target}: {DescribeKind(item)} → объект пересоздан, правка перейдёт на него сама";
+
+                return;
+            }
 
             var destination =
                 item.HolderName == null
@@ -344,21 +345,22 @@ namespace PaperFly.RenderKit.Acceptance.Rescue
                     item.Added = file.Find(added.FileId);
                 }
 
-                // Переименование обрабатывается как удаление: автоматический перенос правок на другой объект
-                // мог бы ошибиться, а «_Потерянное» разработчик разбирает сам. Новое имя — только подсказка.
-                if (targets.TryGetRenamed(
+                // Пересозданный объект — тот же объект с новым идентификатором: правка переносится на него сама.
+                // Переименование обрабатывается как удаление: угадывать новое имя ненадёжно.
+                item.IsRecreated =
+                    targets.TryGetRecreated(
                         target.Guid,
                         target.FileId,
-                        out var renamedPath))
-                {
-                    item.RenamedPath = renamedPath;
-                }
+                        out _);
 
-                item.HolderName =
-                    GetHolderName(
-                        item,
-                        source.Guid,
-                        targets);
+                if (!item.IsRecreated)
+                {
+                    item.HolderName =
+                        GetHolderName(
+                            item,
+                            source.Guid,
+                            targets);
+                }
 
                 Describe(
                     file,
@@ -705,7 +707,7 @@ namespace PaperFly.RenderKit.Acceptance.Rescue
         }
 
         /// <summary>
-        /// Переносит добавленное на удалённые и переименованные объекты в объекты «_Потерянное …» под корнями экземпляров.
+        /// Переносит добавленное на удалённые и переименованные объекты в «_Потерянное …», а правки пересозданных объектов — на новые.
         /// </summary>
         /// <param name="file">Разобранный файл; меняется на месте.</param>
         /// <param name="items">Потерянные правки этого файла из <see cref="Find"/>.</param>
@@ -731,7 +733,14 @@ namespace PaperFly.RenderKit.Acceptance.Rescue
                     targets);
             }
 
-            return instances.Count > 0;
+            // После переноса в «_Потерянное»: перенос сверяет элементы списков правок с исходными строками.
+            var retargeted =
+                RecreatedRetargeter.Apply(
+                    file,
+                    targets);
+
+            return instances.Count > 0
+                || retargeted;
         }
     }
 }

@@ -83,9 +83,9 @@ namespace PaperFly.RenderKit.Acceptance.Rescue
         public UnityYamlDocument Added { get; set; }
 
         /// <summary>
-        /// Путь объекта, в который переименован потерянный; <c>null</c>, если объект удалён.
+        /// Объект пересоздан с тем же путём и типом: правка переносится на него сама.
         /// </summary>
-        public string RenamedPath { get; set; }
+        public bool IsRecreated { get; set; }
 
         /// <summary>
         /// Имя объекта «_Потерянное …», куда переносится добавленное; <c>null</c>, если перенести нельзя.

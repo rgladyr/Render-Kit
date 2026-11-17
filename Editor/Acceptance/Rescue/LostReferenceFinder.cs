@@ -82,10 +82,22 @@ namespace PaperFly.RenderKit.Acceptance.Rescue
 
             lost = reference;
 
-            return targets.IsLost(
-                reference.Guid,
-                reference.FileId);
+            return IsGone(
+                reference,
+                targets);
         }
+
+        // Пересозданный объект не пропал: ссылку на него переводит RecreatedRetargeter.
+        private static bool IsGone(
+            YamlReference reference,
+            ILostTargets targets)
+            => targets.IsLost(
+                   reference.Guid,
+                   reference.FileId)
+            && !targets.TryGetRecreated(
+                   reference.Guid,
+                   reference.FileId,
+                   out _);
 
         private static Dictionary<long, YamlReference> FindLostStubs(
             UnityYamlFile file,
@@ -98,9 +110,9 @@ namespace PaperFly.RenderKit.Acceptance.Rescue
                 if (YamlReference.TryFind(
                         document.GetValue("m_CorrespondingSourceObject"),
                         out var source)
-                 && targets.IsLost(
-                        source.Guid,
-                        source.FileId))
+                 && IsGone(
+                        source,
+                        targets))
                 {
                     stubs[document.FileId] = source;
                 }
@@ -199,7 +211,9 @@ namespace PaperFly.RenderKit.Acceptance.Rescue
                 yield return new LostReference(
                     component,
                     index,
-                    $"{owner}, поле {field} → {target}");
+                    $"{owner}, поле {field} → {target}",
+                    field,
+                    null);
             }
         }
 
@@ -219,9 +233,9 @@ namespace PaperFly.RenderKit.Acceptance.Rescue
                 if (!YamlReference.TryFind(
                         entry[0],
                         out var target)
-                 || targets.IsLost(
-                        target.Guid,
-                        target.FileId))
+                 || IsGone(
+                        target,
+                        targets))
                 {
                     continue;
                 }
@@ -270,7 +284,9 @@ namespace PaperFly.RenderKit.Acceptance.Rescue
                 yield return new LostReference(
                     instance,
                     index,
-                    $"{owner}, свойство {property} → {lostTarget}");
+                    $"{owner}, свойство {property} → {lostTarget}",
+                    property,
+                    ToTargetKey(target));
             }
         }
 
@@ -313,6 +329,103 @@ namespace PaperFly.RenderKit.Acceptance.Rescue
         }
 
         /// <summary>
+        /// Проверяет, осталась ли очищенная ссылка пустой.
+        /// </summary>
+        /// <param name="file">Разобранный файл.</param>
+        /// <param name="documentId">Идентификатор компонента или экземпляра префаба в файле.</param>
+        /// <param name="field">Поле компонента или путь свойства правки.</param>
+        /// <param name="modificationTarget">Цель правки «guid:fileId»; <c>null</c> для поля компонента.</param>
+        /// <returns><c>false</c>, если ссылку назначили, правку отменили или компонент удалили.</returns>
+        /// <remarks>
+        /// Сомнительные случаи считаются исправленными: лучше отпустить, чем запретить приём навсегда.
+        /// </remarks>
+        public static bool IsStillEmpty(
+            UnityYamlFile file,
+            long documentId,
+            string field,
+            string modificationTarget)
+        {
+            var document = file.Find(documentId);
+
+            if (document == null)
+            {
+                return false;
+            }
+
+            if (modificationTarget == null)
+            {
+                return IsFieldEmpty(
+                    document,
+                    field);
+            }
+
+            var entry =
+                document
+                    .GetEntries(
+                        ModificationsList,
+                        ModificationIndent)
+                    .FirstOrDefault(lines => YamlReference.TryFind(
+                                                 lines[0],
+                                                 out var target)
+                                          && string.Equals(
+                                                 ToTargetKey(target),
+                                                 modificationTarget,
+                                                 StringComparison.Ordinal)
+                                          && lines.Any(line => string.Equals(
+                                                 line.Trim(),
+                                                 "propertyPath: " + field,
+                                                 StringComparison.Ordinal)));
+
+            return entry != null
+                && entry.Any(line => string.Equals(
+                                         GetKey(line),
+                                         "objectReference",
+                                         StringComparison.Ordinal)
+                                  && line.Contains(EmptyReference));
+        }
+
+        private static string ToTargetKey(YamlReference target)
+            => $"{target.Guid}:{target.FileId}";
+
+        private static bool IsFieldEmpty(
+            UnityYamlDocument document,
+            string field)
+        {
+            string lastKey = null;
+
+            foreach (var line in document.Lines)
+            {
+                var key = GetKey(line);
+                var isElement = IsElement(line);
+
+                if (key != null
+                 && !isElement)
+                {
+                    lastKey = key;
+                }
+
+                var isField =
+                    isElement
+                        ? string.Equals(
+                            key ?? lastKey,
+                            field,
+                            StringComparison.Ordinal)
+                        : string.Equals(
+                            key,
+                            field,
+                            StringComparison.Ordinal);
+
+                if (isField
+                 && line.Contains(EmptyReference))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
         /// Записывает пустую ссылку вместо ссылок на удалённые объекты: то же сделала бы Unity при сохранении, но молча.
         /// </summary>
         /// <param name="references">Ссылки из <see cref="Find"/>.</param>
@@ -348,15 +461,31 @@ namespace PaperFly.RenderKit.Acceptance.Rescue
             /// <param name="document">Документ, в котором записана ссылка.</param>
             /// <param name="lineIndex">Номер строки в документе; -1, если строка не найдена.</param>
             /// <param name="description">Описание для отчёта.</param>
+            /// <param name="field">Поле компонента или путь свойства в правке экземпляра.</param>
+            /// <param name="modificationTarget">Цель правки экземпляра «guid:fileId»; <c>null</c> для поля компонента.</param>
             public LostReference(
                 UnityYamlDocument document,
                 int lineIndex,
-                string description)
+                string description,
+                string field,
+                string modificationTarget)
             {
                 this.Document = document;
                 this.LineIndex = lineIndex;
                 this.Description = description;
+                this.Field = field;
+                this.ModificationTarget = modificationTarget;
             }
+
+            /// <summary>
+            /// Поле компонента или путь свойства в правке экземпляра.
+            /// </summary>
+            public string Field { get; }
+
+            /// <summary>
+            /// Цель правки экземпляра «guid:fileId»; <c>null</c>, если ссылка — поле компонента.
+            /// </summary>
+            public string ModificationTarget { get; }
 
             /// <summary>
             /// Документ, в котором записана ссылка.
