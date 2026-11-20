@@ -171,7 +171,6 @@ namespace PaperFly.RenderKit.Release
             }
 
             var mainPackage = packageFiles[0];
-            var packageName = NamePattern.Match(File.ReadAllText(mainPackage)).Groups["name"].Value;
 
             var packageFolder =
                 Path
@@ -184,13 +183,12 @@ namespace PaperFly.RenderKit.Release
                 LocationReadme.Update(
                     Environment.CurrentDirectory,
                     result.Output,
-                    packageName,
                     "/" + packageFolder,
                     repositoryName);
 
             if (isReadmeChanged)
             {
-                Debug.Log($"{LogPrefix} В README.md записаны строка подключения локации в игру и заголовок. Закоммитьте README.md.");
+                Debug.Log($"{LogPrefix} В README.md записаны адрес пакета для подключения в игру и заголовок. Закоммитьте README.md.");
             }
 
             if (isChanged)

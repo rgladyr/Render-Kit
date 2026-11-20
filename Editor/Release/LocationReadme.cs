@@ -5,10 +5,11 @@ using System.Text.RegularExpressions;
 namespace PaperFly.RenderKit.Release
 {
     /// <summary>
-    /// Заполняет README.md репозитория локации: заголовок и готовую строку подключения пакета в игру.
+    /// Заполняет README.md репозитория локации: заголовок и адрес пакета для подключения в игру.
     /// </summary>
     /// <remarks>
-    /// Разработчику не нужно собирать адрес вручную: строку из README достаточно скопировать в Packages/manifest.json игры.
+    /// Разработчику не нужно собирать адрес вручную: его достаточно скопировать в Package Manager игры
+    /// (Add package from git URL). Адрес без кавычек и имени пакета, чтобы копировался целиком.
     /// Заменяется только текст между метками paperfly:game-package и заголовок шаблона, остальное не трогается.
     /// </remarks>
     internal static class LocationReadme
@@ -67,14 +68,12 @@ namespace PaperFly.RenderKit.Release
         /// </summary>
         /// <param name="projectFolder">Корень репозитория.</param>
         /// <param name="remoteUrl">Адрес из git remote.</param>
-        /// <param name="packageName">Имя пакета из package.json.</param>
         /// <param name="packagePath">Путь к папке пакета в репозитории, например /Assets/Location.</param>
         /// <param name="repositoryName">Имя репозитория для заголовка.</param>
         /// <returns><c>true</c>, если файл изменён.</returns>
         public static bool Update(
             string projectFolder,
             string remoteUrl,
-            string packageName,
             string packagePath,
             string repositoryName)
         {
@@ -94,8 +93,8 @@ namespace PaperFly.RenderKit.Release
                     ? "\r\n"
                     : "\n";
 
-            var line = $"\"{packageName}\": \"{ToHttpsUrl(remoteUrl)}?path={packagePath}\"";
-            var body = $"```json{newLine}{line}{newLine}```";
+            var line = $"{ToHttpsUrl(remoteUrl)}?path={packagePath}";
+            var body = $"```{newLine}{line}{newLine}```";
 
             var updated =
                 BlockPattern.Replace(
