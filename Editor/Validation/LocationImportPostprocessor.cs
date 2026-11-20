@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 
 using PaperFly.RenderKit.Validation.Materials;
@@ -18,9 +19,13 @@ namespace PaperFly.RenderKit.Validation
     {
         private const string PresetRuleTitle = "Пресет импорта";
 
+        private const string NormalChannel = "Normal";
+
         private static readonly ModelValidator Validator = new ModelValidator();
 
         private static readonly string[] ArtistOwnedProperties = { "m_LODScreenPercentages" };
+
+        private static readonly string[] LinearChannels = { "Roughness", "Metallic", "AO", "Height", "Opacity" };
 
         // Unity создаёт новый обработчик на каждый импортируемый файл, поэтому проблемы предобработки
         // доживают до постобработки того же файла.
@@ -152,9 +157,39 @@ namespace PaperFly.RenderKit.Validation
 
         private void OnPreprocessTexture()
         {
-            if (LocationAssets.IsLocationAsset(this.assetPath))
+            if (!LocationAssets.IsLocationAsset(this.assetPath))
             {
-                this.ApplyPreset(Constants.Paths.TexturePreset);
+                return;
+            }
+
+            this.ApplyPreset(Constants.Paths.TexturePreset);
+            this.ApplyChannel();
+        }
+
+        // По соглашению назначение карты стоит в конце имени (Box.v1.Normal.png): по нему импорт сам ставит тип карты.
+        // Карты данных (шероховатость, металличность, затенение, высота, маска) читаются без гамма-коррекции.
+        private void ApplyChannel()
+        {
+            var channel = NameGrammar.FindTextureChannel(Path.GetFileNameWithoutExtension(this.assetPath));
+
+            if (channel == null
+             || !(this.assetImporter is TextureImporter importer))
+            {
+                return;
+            }
+
+            if (string.Equals(
+                    channel,
+                    NormalChannel,
+                    StringComparison.Ordinal))
+            {
+                importer.textureType = TextureImporterType.NormalMap;
+            }
+            else if (LinearChannels.Contains(
+                         channel,
+                         StringComparer.Ordinal))
+            {
+                importer.sRGBTexture = false;
             }
         }
     }

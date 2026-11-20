@@ -13,7 +13,7 @@ namespace PaperFly.RenderKit.Validation
         /// <summary>
         /// Версия обработчика импорта. Увеличение переимпортирует все модели и текстуры проекта.
         /// </summary>
-        internal const uint PostprocessorVersion = 1;
+        internal const uint PostprocessorVersion = 2;
 
         /// <summary>
         /// Пути к пресетам и признак файлов локации.
@@ -95,9 +95,9 @@ namespace PaperFly.RenderKit.Validation
             internal const string BlenderDefaultMaterialPattern = @"^Material(\.\d{3})?$";
 
             /// <summary>
-            /// Суффикс .001, который Blender добавляет к копии объекта.
+            /// Имена, которые Blender даёт атрибутам и их материалам: Attribute, Attribute.007, Attribute.ClipFace.
             /// </summary>
-            internal const string DuplicateSuffixPattern = @"\.\d{3}$";
+            internal const string BlenderDefaultAttributePattern = @"^Attribute(\..+)?$";
 
             /// <summary>
             /// Уровень LOD в конце имени: Tree_LOD0, Tree_LOD1.

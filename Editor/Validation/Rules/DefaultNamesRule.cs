@@ -7,9 +7,11 @@ using UnityEngine;
 namespace PaperFly.RenderKit.Validation
 {
     /// <summary>
-    /// Находит объекты и материалы с именами Blender по умолчанию (Cube.001, Material.003)
-    /// и объекты с суффиксом копии .001.
+    /// Находит объекты и материалы с именами Blender по умолчанию (Cube.001, Material.003, Attribute.007).
     /// </summary>
+    /// <remarks>
+    /// Суффикс .001 сам по себе не ошибка: по соглашению о наименованиях это индекс экземпляра (Bench.v1.001).
+    /// </remarks>
     internal sealed class DefaultNamesRule : IModelRule
     {
         // Unity компилирует на C# 9 без генераторов регулярных выражений, поэтому GeneratedRegex недоступен.
@@ -23,9 +25,10 @@ namespace PaperFly.RenderKit.Validation
                 Constants.Names.BlenderDefaultMaterialPattern,
                 RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-        private static readonly Regex DuplicateSuffix =
+        // Имена, которые Blender даёт датаблокам атрибутов: в Unity они приходят именами материалов.
+        private static readonly Regex DefaultAttributeName =
             new Regex(
-                Constants.Names.DuplicateSuffixPattern,
+                Constants.Names.BlenderDefaultAttributePattern,
                 RegexOptions.Compiled);
 
         /// <inheritdoc/>
@@ -62,17 +65,6 @@ namespace PaperFly.RenderKit.Validation
                         ValidationSeverity.Error,
                         target,
                         $"Имя Blender по умолчанию «{target.name}». Дайте объекту осмысленное имя."));
-
-                return;
-            }
-
-            if (DuplicateSuffix.IsMatch(target.name))
-            {
-                issues.Add(
-                    context.CreateIssue(
-                        ValidationSeverity.Error,
-                        target,
-                        $"Суффикс копии в имени «{target.name}». Похоже на случайный дубль."));
             }
         }
 
@@ -100,6 +92,22 @@ namespace PaperFly.RenderKit.Validation
                         ValidationSeverity.Error,
                         target,
                         $"Материал с именем Blender по умолчанию «{name}». Дайте материалу осмысленное имя."));
+            }
+
+            var attributeNames =
+                renderer.sharedMaterials
+                    .Where(material => material != null)
+                    .Select(material => material.name)
+                    .Where(name => DefaultAttributeName.IsMatch(name))
+                    .Distinct();
+
+            foreach (var name in attributeNames)
+            {
+                issues.Add(
+                    context.CreateIssue(
+                        ValidationSeverity.Warning,
+                        target,
+                        $"Материал с автоматическим именем Blender «{name}». Назовите его как модель или по назначению (VertexColor)."));
             }
         }
     }

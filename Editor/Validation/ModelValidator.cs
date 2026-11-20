@@ -15,6 +15,7 @@ namespace PaperFly.RenderKit.Validation
         {
             new DuplicateSiblingNamesRule(),
             new DefaultNamesRule(),
+            new NamingConventionRule(),
             new NegativeScaleRule(),
             new ExportArtifactRule(),
             new MeshContentRule(),
@@ -37,6 +38,21 @@ namespace PaperFly.RenderKit.Validation
                 AssetNameRule.Title,
                 found => AssetNameRule.Validate(
                     assetPath,
+                    found),
+                issues);
+
+            Run(
+                TextureNameRule.Title,
+                found => TextureNameRule.Validate(
+                    assetPath,
+                    found),
+                issues);
+
+            Run(
+                AssetNameRule.Title,
+                found => AssetNameRule.ValidateConvention(
+                    assetPath,
+                    false,
                     found),
                 issues);
 
@@ -79,6 +95,14 @@ namespace PaperFly.RenderKit.Validation
                 AssetNameRule.Title,
                 found => AssetNameRule.Validate(
                     context.AssetPath,
+                    found),
+                issues);
+
+            Run(
+                AssetNameRule.Title,
+                found => AssetNameRule.ValidateConvention(
+                    context.AssetPath,
+                    true,
                     found),
                 issues);
 

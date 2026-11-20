@@ -43,6 +43,64 @@ namespace PaperFly.RenderKit.Validation
             }
         }
 
+        /// <summary>
+        /// Проверяет имя файла модели и имена папок по соглашению о наименованиях: PascalCase, разделитель — точка.
+        /// </summary>
+        /// <param name="assetPath">Путь к файлу.</param>
+        /// <param name="checkFileName"><c>false</c> для текстур: их имя проверяет отдельное правило.</param>
+        /// <param name="issues">Список, в который добавляются проблемы.</param>
+        /// <remarks>
+        /// Пробелы и символы вне латиницы уже ошибки (<see cref="Validate"/>), здесь только предупреждения.
+        /// </remarks>
+        public static void ValidateConvention(
+            string assetPath,
+            bool checkFileName,
+            ICollection<ValidationIssue> issues)
+        {
+            var packageFolder = LocationAssets.FindPackageFolder(assetPath) ?? string.Empty;
+
+            var relative =
+                assetPath.Length > packageFolder.Length
+                    ? assetPath.Substring(packageFolder.Length).TrimStart('/')
+                    : assetPath;
+
+            var parts = relative.Split('/').ToList();
+            var folders = parts.Take(parts.Count - 1).ToList();
+
+            var names =
+                checkFileName
+                    ? folders.Append(Path.GetFileNameWithoutExtension(assetPath))
+                    : folders;
+
+            foreach (var name in names)
+            {
+                var problems =
+                    NameGrammar
+                        .FindSymbolProblems(name)
+                        .Where(problem => !problem.StartsWith(
+                                              "пробел",
+                                              System.StringComparison.Ordinal)
+                                       && !problem.Contains("не латиниц"))
+                        .ToList();
+
+                if (name.Length > 0
+                 && char.IsLower(name[0]))
+                {
+                    problems.Add("слова пишутся с заглавной (PascalCase)");
+                }
+
+                if (problems.Count > 0)
+                {
+                    issues.Add(
+                        new ValidationIssue(
+                            ValidationSeverity.Warning,
+                            assetPath,
+                            string.Empty,
+                            $"Имя «{name}» не по соглашению: {string.Join("; ", problems)}."));
+                }
+            }
+        }
+
         private static ValidationIssue CreateIssue(
             string assetPath,
             string message)
