@@ -13,7 +13,8 @@ using UnityEngine;
 namespace PaperFly.RenderKit.Release
 {
     /// <summary>
-    /// В новом проекте из шаблона задаёт имя пакета локации по имени репозитория, чтобы художнику не нужно было делать это вручную.
+    /// В новом проекте из шаблона задаёт имя пакета локации по имени репозитория и выдаёт файлам шаблона новые GUID,
+    /// чтобы художнику не нужно было делать это вручную.
     /// </summary>
     /// <remarks>
     /// Имя меняется только пока в package.json стоит имя из шаблона: заданное вручную не трогается.
@@ -24,7 +25,10 @@ namespace PaperFly.RenderKit.Release
     {
         private const string LogPrefix = "[Render Kit]";
 
-        private const string TemplateName = "com.paperfly.newlocation";
+        /// <summary>
+        /// Имя пакета в шаблоне локации.
+        /// </summary>
+        public const string TemplateName = "com.paperfly.newlocation";
 
         private const string NamePrefix = "com.paperfly.";
 
@@ -104,15 +108,21 @@ namespace PaperFly.RenderKit.Release
                 return;
             }
 
-            var packageFile =
-                LocationAssets
-                    .FindSourcePackageFiles()
-                    .FirstOrDefault(path => string.Equals(
-                        NamePattern.Match(File.ReadAllText(path)).Groups["name"].Value,
-                        TemplateName,
-                        StringComparison.Ordinal));
+            var packageFiles = LocationAssets.FindSourcePackageFiles();
 
-            if (packageFile == null)
+            var packageFile =
+                packageFiles.FirstOrDefault(path => string.Equals(
+                    NamePattern.Match(File.ReadAllText(path)).Groups["name"].Value,
+                    TemplateName,
+                    StringComparison.Ordinal));
+
+            var templateMetas =
+                packageFiles
+                    .SelectMany(path => TemplateGuids.Find(Path.GetDirectoryName(path)))
+                    .ToList();
+
+            if (packageFile == null
+             && templateMetas.Count == 0)
             {
                 return;
             }
@@ -139,6 +149,29 @@ namespace PaperFly.RenderKit.Release
                 return;
             }
 
+            if (templateMetas.Count > 0)
+            {
+                var count = TemplateGuids.Regenerate(templateMetas);
+
+                Debug.Log($"{LogPrefix} Файлы шаблона получили новые GUID ({count}): иначе в игре они конфликтовали бы с файлами других локаций. Закоммитьте изменённые .meta.");
+            }
+
+            if (packageFile != null)
+            {
+                Rename(
+                    packageFile,
+                    suffix,
+                    repositoryName);
+            }
+
+            AssetDatabase.Refresh();
+        }
+
+        private static void Rename(
+            string packageFile,
+            string suffix,
+            string repositoryName)
+        {
             var packageName = NamePrefix + suffix;
             var text = File.ReadAllText(packageFile);
 
@@ -157,8 +190,6 @@ namespace PaperFly.RenderKit.Release
             File.WriteAllText(
                 packageFile,
                 text);
-
-            AssetDatabase.ImportAsset(packageFile);
 
             Debug.Log($"{LogPrefix} Имя пакета локации задано по имени репозитория: {packageName}. Его можно поменять в {packageFile}. Закоммитьте изменение.");
         }

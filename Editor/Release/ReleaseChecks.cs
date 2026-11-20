@@ -101,6 +101,34 @@ namespace PaperFly.RenderKit.Release
             }
         }
 
+        // В игре все локации — пакеты одного проекта, и одинаковые GUID у файлов разных локаций конфликтуют.
+        // Сам шаблон (пакет с именем шаблона) свои GUID сохраняет.
+        private static void CheckTemplateGuids(
+            LocationPackage package,
+            List<string> errors)
+        {
+            if (string.Equals(
+                    package.Name,
+                    LocationPackageNamer.TemplateName,
+                    StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            var metas = TemplateGuids.Find(package.Folder);
+
+            if (metas.Count == 0)
+            {
+                return;
+            }
+
+            AddError(
+                errors,
+                package.Folder,
+                PackageRule,
+                $"У файлов остались GUID шаблона ({string.Join(", ", metas)}): в игре они конфликтовали бы с такими же файлами других локаций. Откройте проект в Unity — Render Kit сам выдаст новые GUID, — закоммитьте изменённые .meta и повторите push.");
+        }
+
         // В игру попадает только папка пакета. Ссылка на файл из остального проекта художников
         // в игре окажется пустой: у художника объект выглядит нормально, а в игре, например, станет розовым.
         private static void CheckExternalReferences(
@@ -253,6 +281,10 @@ namespace PaperFly.RenderKit.Release
 
                 CheckLfsRules(
                     package.Folder,
+                    errors);
+
+                CheckTemplateGuids(
+                    package,
                     errors);
 
                 packages.Add(package);
