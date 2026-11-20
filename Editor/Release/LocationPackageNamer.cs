@@ -54,7 +54,7 @@ namespace PaperFly.RenderKit.Release
                 return;
             }
 
-            EditorApplication.delayCall += NameIfTemplate;
+            EditorApplication.delayCall += PrepareProject;
         }
 
         // «https://github.com/org/PaperFly.Location.Beach.git» → «Beach».
@@ -101,7 +101,7 @@ namespace PaperFly.RenderKit.Release
                 .Trim('.');
         }
 
-        private static async void NameIfTemplate()
+        private static async void PrepareProject()
         {
             if (!ProjectRole.IsLocationProject)
             {
@@ -121,8 +121,8 @@ namespace PaperFly.RenderKit.Release
                     .SelectMany(path => TemplateGuids.Find(Path.GetDirectoryName(path)))
                     .ToList();
 
-            if (packageFile == null
-             && templateMetas.Count == 0)
+            // README проверяется при каждом открытии: имя пакета могли поменять вручную.
+            if (packageFiles.Count == 0)
             {
                 return;
             }
@@ -149,11 +149,15 @@ namespace PaperFly.RenderKit.Release
                 return;
             }
 
+            var isChanged = false;
+
             if (templateMetas.Count > 0)
             {
                 var count = TemplateGuids.Regenerate(templateMetas);
 
                 Debug.Log($"{LogPrefix} Файлы шаблона получили новые GUID ({count}): иначе в игре они конфликтовали бы с файлами других локаций. Закоммитьте изменённые .meta.");
+
+                isChanged = true;
             }
 
             if (packageFile != null)
@@ -162,9 +166,37 @@ namespace PaperFly.RenderKit.Release
                     packageFile,
                     suffix,
                     repositoryName);
+
+                isChanged = true;
             }
 
-            AssetDatabase.Refresh();
+            var mainPackage = packageFiles[0];
+            var packageName = NamePattern.Match(File.ReadAllText(mainPackage)).Groups["name"].Value;
+
+            var packageFolder =
+                Path
+                    .GetDirectoryName(mainPackage)
+                    .Replace(
+                        '\\',
+                        '/');
+
+            var isReadmeChanged =
+                LocationReadme.Update(
+                    Environment.CurrentDirectory,
+                    result.Output,
+                    packageName,
+                    "/" + packageFolder,
+                    repositoryName);
+
+            if (isReadmeChanged)
+            {
+                Debug.Log($"{LogPrefix} В README.md записаны строка подключения локации в игру и заголовок. Закоммитьте README.md.");
+            }
+
+            if (isChanged)
+            {
+                AssetDatabase.Refresh();
+            }
         }
 
         private static void Rename(
